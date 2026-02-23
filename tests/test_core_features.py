@@ -172,7 +172,8 @@ class CoreFeatureTests(unittest.TestCase):
         self._login(client)
 
         email_addr = f"temp_{uuid.uuid4().hex}@example.com"
-        with patch.object(self.module.impl, "generate_temp_email", return_value=email_addr):
+        # Mock generate_temp_email 返回元组 (email_addr, None)
+        with patch.object(self.module.impl, "generate_temp_email", return_value=(email_addr, None)):
             created = client.post("/api/temp-emails/generate", json={"prefix": "x", "domain": "y"})
         self.assertEqual(created.status_code, 200)
         created_data = created.get_json()

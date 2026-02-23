@@ -84,7 +84,16 @@
                     loadTempEmails(true);
                     loadGroups();
                 } else {
-                    handleApiError(data, '生成临时邮箱失败');
+                    // 显示详细的错误信息
+                    const errorMsg = data.error || '生成临时邮箱失败';
+                    if (data.error && typeof data.error === 'object') {
+                        // 结构化错误对象
+                        const detailedError = data.error.message || data.error.error || errorMsg;
+                        showToast(detailedError, 'error', data.error);
+                    } else {
+                        // 字符串错误
+                        showToast(errorMsg, 'error');
+                    }
                 }
             } catch (error) {
                 showToast('生成临时邮箱失败', 'error');

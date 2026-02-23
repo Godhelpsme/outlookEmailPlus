@@ -4170,20 +4170,29 @@ def api_get_temp_emails():
 @login_required
 def api_generate_temp_email():
     """生成新的临时邮箱"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     data = request.json or {}
     prefix = data.get('prefix')
     domain = data.get('domain')
-    
-    email_addr = generate_temp_email(prefix, domain)
-    
+
+    # 调用改进后的 generate_temp_email，返回 (email_addr, error_msg)
+    email_addr, error_msg = generate_temp_email(prefix, domain)
+
     if email_addr:
+        # 成功生成邮箱地址
         if add_temp_email(email_addr):
             log_audit('create', 'temp_email', email_addr, "生成临时邮箱")
+            logger.info(f"临时邮箱生成成功: {email_addr}")
             return jsonify({'success': True, 'email': email_addr, 'message': '临时邮箱创建成功'})
         else:
+            logger.warning(f"临时邮箱已存在: {email_addr}")
             return jsonify({'success': False, 'error': '邮箱已存在'})
     else:
-        return jsonify({'success': False, 'error': '生成临时邮箱失败，请稍后重试'})
+        # 生成失败，返回详细错误信息
+        logger.error(f"临时邮箱生成失败: {error_msg}, prefix={prefix}, domain={domain}")
+        return jsonify({'success': False, 'error': error_msg or '生成临时邮箱失败，请稍后重试'})
 
 
 @app.route('/api/temp-emails/<path:email_addr>', methods=['DELETE'])

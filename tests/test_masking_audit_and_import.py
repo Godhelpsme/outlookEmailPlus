@@ -187,7 +187,8 @@ class MaskingAuditAndImportTests(unittest.TestCase):
         unique = uuid.uuid4().hex
         email_addr = f"tmp_{unique}@example.com"
 
-        with patch.object(self.module.impl, "generate_temp_email", return_value=email_addr):
+        # Mock generate_temp_email 返回元组 (email_addr, None)
+        with patch.object(self.module.impl, "generate_temp_email", return_value=(email_addr, None)):
             resp = client.post("/api/temp-emails/generate", json={})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json().get("success"), True)
