@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+import html
+import json
+from datetime import datetime
+from typing import Any, Dict
+from urllib.parse import quote
+
+from flask import Response, jsonify, request
+
+from outlook_web.errors import build_error_payload
+from outlook_web.repositories import accounts as accounts_repo
+from outlook_web.repositories import groups as groups_repo
+from outlook_web.repositories import temp_emails as temp_emails_repo
+from outlook_web.security.auth import (
+    consume_export_verify_token,
+    login_required,
+)
+from outlook_web.audit import log_audit
+
+
+def sanitize_input(text: str, max_length: int = 500) -> str:
+    """
+    净化用户输入，防止XSS攻击
+    - 转义HTML特殊字符
+    - 限制长度
+    - 移除控制字符
+    """
+    if not text:
+        return ""
+
+    # 限制长度
+    text = text[:max_length]
+
+    # 移除控制字符（保留换行和制表符）
+    text = ''.join(char for char in text if char.isprintable() or char in '\n\t')
+
+    # 转义HTML特殊字符
+    text = html.escape(text, quote=True)
+
+    return text
+
+
+# ==================== 分组 API ====================
+
+
+@login_required
+def api_get_groups() -> Any:
+    """获取所有分组"""
+    groups = groups_repo.load_groups()
+    # 添加每个分组的邮箱数量
+    for group in groups:
+        if group['name'] == '临时邮箱':
+            # 临时邮箱分组从 temp_emails 表获取数量
+            group['account_count'] = temp_emails_repo.get_temp_email_count()
+        else:
+            group['account_count'] = groups_repo.get_group_account_count(group['id'])
+    return jsonify({'success': True, 'groups': groups})
+
+
+@login_required
+def api_get_group(group_id: int) -> Any:
+    """获取单个分组"""
+    group = groups_repo.get_group_by_id(group_id)
+    if not group:
+        return jsonify({'success': False, 'error': '分组不存在'})
+    group['account_count'] = groups_repo.get_group_account_count(group_id)
+    return jsonify({'success': True, 'group': group})
+
+
+@login_required
+def api_add_group() -> Any:
+    """添加分组"""
+    data = request.json
+    name = sanitize_input(data.get('name', '').strip(), max_length=100)
+    description = sanitize_input(data.get('description', ''), max_length=500)
+    color = data.get('color', '#1a1a1a')
+    proxy_url = data.get('proxy_url', '').strip()
+
+    if not name:
+        return jsonify({'success': False, 'error': '分组名称不能为空'})
+
+    group_id = groups_repo.add_group(name, description, color, proxy_url)
+    if group_id:
+        log_audit('create', 'group', str(group_id), f"创建分组：{name}")
+        return jsonify({'success': True, 'message': '分组创建成功', 'group_id': group_id})
+    else:
+        return jsonify({'success': False, 'error': '分组名称已存在'})
+
+
+@login_required
+def api_update_group(group_id: int) -> Any:
+    """更新分组"""
+    data = request.json
+    name = sanitize_input(data.get('name', '').strip(), max_length=100)
+    description = sanitize_input(data.get('description', ''), max_length=500)
+    color = data.get('color', '#1a1a1a')
+    proxy_url = data.get('proxy_url', '').strip()
+
+    if not name:
+        return jsonify({'success': False, 'error': '分组名称不能为空'})
+
+    existing = groups_repo.get_group_by_id(group_id)
+    if not existing:
+        error_payload = build_error_payload(
+            code="GROUP_NOT_FOUND",
+            message="分组不存在",
+            err_type="NotFoundError",
+            status=404,
+            details=f"group_id={group_id}",
+        )
+        return jsonify({'success': False, 'error': error_payload}), 404
+
+    # 系统分组保护：不允许重命名（避免破坏系统逻辑）
+    if existing.get('is_system') and name != existing.get('name'):
+        error_payload = build_error_payload(
+            code="SYSTEM_GROUP_PROTECTED",
+            message="系统分组不允许重命名",
+            err_type="ForbiddenError",
+            status=403,
+            details=f"group_id={group_id}",
+        )
+        return jsonify({'success': False, 'error': error_payload}), 403
+
+    if groups_repo.update_group(group_id, name, description, color, proxy_url):
+        # 不记录 proxy_url 明文（可能包含代理账号/密码）
+        details = json.dumps({
+            "name": name,
+            "has_description": bool(description),
+            "color": color,
+            "proxy_configured": bool(proxy_url)
+        }, ensure_ascii=False)
+        log_audit('update', 'group', str(group_id), details)
+        return jsonify({'success': True, 'message': '分组更新成功'})
+    else:
+        return jsonify({'success': False, 'error': '更新失败'})
+
+
+@login_required
+def api_delete_group(group_id: int) -> Any:
+    """删除分组"""
+    group = groups_repo.get_group_by_id(group_id)
+    if not group:
+        error_payload = build_error_payload(
+            code="GROUP_NOT_FOUND",
+            message="分组不存在",
+            err_type="NotFoundError",
+            status=404,
+            details=f"group_id={group_id}",
+        )
+        return jsonify({'success': False, 'error': error_payload}), 404
+
+    if group.get('is_system'):
+        error_payload = build_error_payload(
+            code="SYSTEM_GROUP_PROTECTED",
+            message="系统分组不能删除",
+            err_type="ForbiddenError",
+            status=403,
+            details=f"group_id={group_id}",
+        )
+        return jsonify({'success': False, 'error': error_payload}), 403
+
+    default_group_id = groups_repo.get_default_group_id()
+    if group_id == default_group_id or group.get('name') == '默认分组':
+        error_payload = build_error_payload(
+            code="DEFAULT_GROUP_PROTECTED",
+            message="默认分组不能删除",
+            err_type="ForbiddenError",
+            status=403,
+            details=f"group_id={group_id}",
+        )
+        return jsonify({'success': False, 'error': error_payload}), 403
+
+    if groups_repo.delete_group(group_id):
+        log_audit('delete', 'group', str(group_id), "删除分组并迁移账号到默认分组")
+        return jsonify({'success': True, 'message': '分组已删除，邮箱已移至默认分组'})
+    else:
+        return jsonify({'success': False, 'error': '删除失败'})
+
+
+@login_required
+def api_export_group(group_id: int) -> Any:
+    """导出分组下的所有邮箱账号为 TXT 文件（需要二次验证）"""
+    # 检查二次验证token（一次性）
+    verify_token = request.args.get('verify_token')
+    ok, error_message = consume_export_verify_token(verify_token)
+    if not ok:
+        return jsonify({'success': False, 'error': error_message, 'need_verify': True}), 401
+
+    group = groups_repo.get_group_by_id(group_id)
+    if not group:
+        return jsonify({'success': False, 'error': '分组不存在'})
+
+    # 使用 load_accounts 获取该分组下的所有账号（自动解密）
+    accounts = accounts_repo.load_accounts(group_id)
+
+    if not accounts:
+        return jsonify({'success': False, 'error': '该分组下没有邮箱账号'})
+
+    # 记录审计日志
+    log_audit('export', 'group', str(group_id), f"导出分组 '{group['name']}' 的 {len(accounts)} 个账号")
+
+    # 生成导出内容（格式：email----password----client_id----refresh_token）
+    lines = []
+    for acc in accounts:
+        line = f"{acc['email']}----{acc.get('password', '')}----{acc['client_id']}----{acc['refresh_token']}"
+        lines.append(line)
+
+    content = '\n'.join(lines)
+
+    # 生成文件名（使用 URL 编码处理中文）
+    filename = f"{group['name']}_accounts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    encoded_filename = quote(filename)
+
+    # 返回文件下载响应
+    return Response(
+        content,
+        mimetype='text/plain; charset=utf-8',
+        headers={
+            'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+    )
