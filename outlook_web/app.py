@@ -24,6 +24,12 @@ def create_app(*, autostart_scheduler: Optional[bool] = None):
         from outlook_web import config, legacy
         from outlook_web.db import register_db
         from outlook_web.security.csrf import init_csrf
+        from outlook_web.middleware import (
+            ensure_trace_id,
+            attach_trace_id_and_normalize_errors,
+            handle_http_exception,
+            handle_exception,
+        )
         from outlook_web.routes import (
             accounts,
             audit,
@@ -62,11 +68,11 @@ def create_app(*, autostart_scheduler: Optional[bool] = None):
         # CSRF（可选）
         _csrf, csrf_exempt, _generate_csrf = init_csrf(app)
 
-        # trace_id + error 结构标准化（复用 legacy 的 hooks 逻辑，保持契约一致）
-        app.before_request(legacy.ensure_trace_id)
-        app.after_request(legacy.attach_trace_id_and_normalize_errors)
-        app.register_error_handler(HTTPException, legacy.handle_http_exception)
-        app.register_error_handler(Exception, legacy.handle_exception)
+        # trace_id + error 结构标准化（迁移到 middleware 模块）
+        app.before_request(ensure_trace_id)
+        app.after_request(attach_trace_id_and_normalize_errors)
+        app.register_error_handler(HTTPException, handle_http_exception)
+        app.register_error_handler(Exception, handle_exception)
 
         # Blueprint 路由注册（URL 不变）
         app.register_blueprint(pages.create_blueprint(csrf_exempt=csrf_exempt))
