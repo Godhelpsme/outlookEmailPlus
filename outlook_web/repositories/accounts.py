@@ -337,3 +337,33 @@ def delete_account_by_email(email_addr: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def update_account_credentials(account_id: int, **fields) -> bool:
+    """仅更新账号的凭据相关字段（用于覆盖导入场景），敏感字段自动加密。"""
+    allowed = {
+        "password", "client_id", "refresh_token",
+        "imap_password", "imap_host", "imap_port",
+        "account_type", "provider", "group_id",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return False
+
+    # 加密敏感字段
+    for key in ("password", "refresh_token", "imap_password"):
+        if key in updates and updates[key]:
+            updates[key] = encrypt_data(updates[key])
+
+    db = get_db()
+    try:
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [account_id]
+        db.execute(
+            f"UPDATE accounts SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            values,
+        )
+        db.commit()
+        return True
+    except Exception:
+        return False

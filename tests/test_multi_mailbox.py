@@ -58,11 +58,14 @@ class MultiMailboxSupportTests(unittest.TestCase):
         self.assertEqual(data.get("success"), True)
 
         providers = data.get("providers") or []
-        self.assertEqual(len(providers), 8)
-        self.assertEqual(providers[0].get("key"), "outlook")
+        # PRD-00006 / FD-00006：providers 列表新增 "auto"（智能识别混合导入）
+        self.assertEqual(len(providers), 9)
+        self.assertEqual(providers[0].get("key"), "auto")
+        self.assertEqual(providers[1].get("key"), "outlook")
         self.assertEqual(providers[-1].get("key"), "custom")
 
         keys = [p.get("key") for p in providers]
+        self.assertIn("auto", keys)
         self.assertIn("qq", keys)
         self.assertIn("163", keys)
 

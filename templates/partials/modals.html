@@ -84,6 +84,31 @@
                     <input type="number" class="form-input" id="imapPort" placeholder="993" value="993" min="1" max="65535">
                     <div class="form-hint">仅自定义 IMAP 需要填写；端口通常为 993（SSL）</div>
                 </div>
+                <!-- 重复账号处理策略（仅混合导入模式显示）-->
+                <div class="form-group" id="duplicateStrategyGroup" style="display:none;">
+                    <label class="form-label">重复账号处理</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="duplicateStrategy" value="skip" checked>
+                            跳过重复（已存在的账号保持不变）
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="duplicateStrategy" value="overwrite">
+                            覆盖更新（用导入数据更新已存在账号的凭据）
+                        </label>
+                    </div>
+                </div>
+                <!-- 兜底 IMAP 设置（仅混合导入模式显示）-->
+                <div class="form-group" id="fallbackImapGroup" style="display:none;">
+                    <label class="form-label">未知域名的 IMAP 设置（可选）</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" class="form-input" id="fallbackImapHost"
+                               placeholder="imap.example.com" style="flex:1;">
+                        <input type="number" class="form-input" id="fallbackImapPort"
+                               placeholder="993" value="993" style="width:80px;" min="1" max="65535">
+                    </div>
+                    <div class="form-hint">当邮箱域名无法自动识别时，使用此 IMAP 服务器地址</div>
+                </div>
                 <div class="form-group">
                     <label class="form-label">账号信息</label>
                     <textarea class="form-textarea" id="accountInput"

@@ -115,3 +115,11 @@ def get_group_account_count(group_id: int) -> int:
     cursor = db.execute("SELECT COUNT(*) as count FROM accounts WHERE group_id = ?", (group_id,))
     row = cursor.fetchone()
     return row["count"] if row else 0
+
+
+def get_group_by_name(name: str) -> Optional[Dict]:
+    """按名称查找分组（精确匹配，不区分大小写）"""
+    db = get_db()
+    cursor = db.execute("SELECT * FROM groups WHERE LOWER(name) = LOWER(?)", (name,))
+    row = cursor.fetchone()
+    return dict(row) if row else None

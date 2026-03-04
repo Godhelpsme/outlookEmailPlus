@@ -171,6 +171,10 @@ def api_add_account() -> Any:
     if not account_str:
         return jsonify({"success": False, "error": "请输入账号信息"})
 
+    # FD-00006: auto 模式允许 group_id=null（自动分组），需在分组校验前分流
+    if provider == "auto":
+        return _handle_auto_import(data)
+
     # 校验分组
     target_group = groups_repo.get_group_by_id(group_id)
     if not target_group:
@@ -502,6 +506,438 @@ def api_get_providers() -> Any:
     from outlook_web.services.providers import get_provider_list
 
     return jsonify({"success": True, "providers": get_provider_list()})
+
+
+# ==================== Auto 混合导入 (FD-00006) ====================
+
+
+def _detect_line_type(
+    line: str,
+    fallback_host: str = "",
+    fallback_port: int = 993,
+) -> Dict[str, Any]:
+    """
+    根据分隔后的段数和内容特征，自动判断一行账号的类型。
+    返回 {"type", "provider", "fields", "error", "auto_group_name"}。
+    """
+    from outlook_web.services.providers import (
+        KNOWN_PROVIDER_KEYS,
+        MAIL_PROVIDERS,
+        PROVIDER_GROUP_NAME,
+        infer_provider_from_email,
+    )
+
+    parts = line.split("----")
+    n = len(parts)
+
+    def _err(msg: str) -> Dict[str, Any]:
+        return {"type": "error", "provider": "", "fields": {}, "error": msg, "auto_group_name": ""}
+
+    # n >= 5 且 parts[2] == "custom" → 自定义 IMAP
+    if n >= 5 and (parts[2] or "").strip().lower() == "custom":
+        email = parts[0].strip()
+        imap_pwd = parts[1].strip()
+        host = (parts[3] or "").strip()
+        try:
+            port = int((parts[4] or "").strip() or 993)
+        except Exception:
+            port = 993
+        if not email or not imap_pwd or not host:
+            return _err("custom 5段格式缺少必要字段")
+        return {
+            "type": "imap",
+            "provider": "custom",
+            "fields": {"email": email, "imap_password": imap_pwd, "imap_host": host, "imap_port": port},
+            "error": None,
+            "auto_group_name": PROVIDER_GROUP_NAME.get("custom", "自定义IMAP"),
+        }
+
+    # n >= 4 → Outlook（OAuth）
+    if n >= 4:
+        email = parts[0].strip()
+        password = parts[1].strip()
+        client_id = parts[2].strip()
+        refresh_token = "----".join(parts[3:]).strip()
+        if not email or not client_id or not refresh_token:
+            return _err("Outlook 格式缺少 client_id 或 refresh_token")
+        return {
+            "type": "outlook",
+            "provider": "outlook",
+            "fields": {"email": email, "password": password, "client_id": client_id, "refresh_token": refresh_token},
+            "error": None,
+            "auto_group_name": PROVIDER_GROUP_NAME.get("outlook", "Outlook"),
+        }
+
+    # n == 3 → 检查第3段是否为已知 provider
+    if n == 3:
+        email = parts[0].strip()
+        imap_pwd = parts[1].strip()
+        prov = (parts[2] or "").strip().lower()
+        if not email or not imap_pwd:
+            return _err("3段格式缺少邮箱或密码")
+        if prov not in KNOWN_PROVIDER_KEYS:
+            return _err(f"未知的 provider: {prov}")
+        cfg = MAIL_PROVIDERS.get(prov, {})
+        host = cfg.get("imap_host", "")
+        port = int(cfg.get("imap_port", 993))
+        if prov == "custom":
+            return _err("3段格式不支持 custom（需要5段包含 host/port）")
+        return {
+            "type": "imap",
+            "provider": prov,
+            "fields": {"email": email, "imap_password": imap_pwd, "imap_host": host, "imap_port": port},
+            "error": None,
+            "auto_group_name": PROVIDER_GROUP_NAME.get(prov, prov),
+        }
+
+    # n == 2 → 域名推断
+    if n == 2:
+        email = parts[0].strip()
+        imap_pwd = parts[1].strip()
+        if not email or not imap_pwd:
+            return _err("2段格式缺少邮箱或密码")
+        prov = infer_provider_from_email(email)
+        if prov:
+            cfg = MAIL_PROVIDERS.get(prov, {})
+            host = cfg.get("imap_host", "")
+            port = int(cfg.get("imap_port", 993))
+            return {
+                "type": "imap",
+                "provider": prov,
+                "fields": {"email": email, "imap_password": imap_pwd, "imap_host": host, "imap_port": port},
+                "error": None,
+                "auto_group_name": PROVIDER_GROUP_NAME.get(prov, prov),
+            }
+        # 推断失败 → custom 兜底
+        if fallback_host:
+            return {
+                "type": "imap",
+                "provider": "custom",
+                "fields": {"email": email, "imap_password": imap_pwd, "imap_host": fallback_host, "imap_port": fallback_port},
+                "error": None,
+                "auto_group_name": PROVIDER_GROUP_NAME.get("custom", "自定义IMAP"),
+            }
+        return _err("未知域名且未提供兜底 IMAP 服务器地址")
+
+    # n == 1 → GPTMail
+    if n == 1:
+        email = parts[0].strip()
+        if not email or "@" not in email:
+            return _err("无法解析的行")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            return _err("邮箱格式不正确")
+        return {
+            "type": "gptmail",
+            "provider": "gptmail",
+            "fields": {"email": email},
+            "error": None,
+            "auto_group_name": PROVIDER_GROUP_NAME.get("gptmail", "临时邮箱"),
+        }
+
+    return _err("无法解析的行")
+
+
+def _resolve_auto_group(
+    provider: str,
+    group_cache: Dict[str, int],
+    groups_created: List[str],
+) -> int:
+    """根据 provider 查找或创建分组，使用缓存避免重复查询。"""
+    from outlook_web.services.providers import PROVIDER_GROUP_NAME
+
+    if provider in group_cache:
+        return group_cache[provider]
+
+    group_name = PROVIDER_GROUP_NAME.get(provider, provider)
+    existing = groups_repo.get_group_by_name(group_name)
+    if existing:
+        group_cache[provider] = existing["id"]
+        return existing["id"]
+
+    new_id = groups_repo.add_group(group_name)
+    if new_id:
+        group_cache[provider] = new_id
+        groups_created.append(group_name)
+        return new_id
+
+    # 创建失败时尝试再次查找（可能并发创建）
+    existing = groups_repo.get_group_by_name(group_name)
+    if existing:
+        group_cache[provider] = existing["id"]
+        return existing["id"]
+
+    # 兜底：使用默认分组
+    default_id = groups_repo.get_default_group_id()
+    group_cache[provider] = default_id
+    return default_id
+
+
+def _overwrite_account(existing: Dict, detect_result: Dict, group_id: int) -> bool:
+    """覆盖更新已存在账号的凭据字段，保留 remark/tags/status。"""
+    fields: Dict[str, Any] = {"group_id": group_id}
+    d = detect_result
+    prov = d["provider"]
+    f = d["fields"]
+
+    if d["type"] == "outlook":
+        fields["password"] = f.get("password", "")
+        fields["client_id"] = f.get("client_id", "")
+        fields["refresh_token"] = f.get("refresh_token", "")
+        fields["account_type"] = "outlook"
+        fields["provider"] = "outlook"
+    elif d["type"] == "imap":
+        fields["imap_password"] = f.get("imap_password", "")
+        fields["imap_host"] = f.get("imap_host", "")
+        fields["imap_port"] = f.get("imap_port", 993)
+        fields["account_type"] = "imap"
+        fields["provider"] = prov
+
+    return accounts_repo.update_account_credentials(existing["id"], **fields)
+
+
+def _handle_gptmail_import(
+    email: str,
+    errors: List[Dict[str, Any]],
+    line_num: int,
+    gptmail_count: int,
+    max_gptmail: int = 20,
+) -> bool:
+    """处理 GPTMail 临时邮箱的导入，写入 temp_emails 表。"""
+    from outlook_web.repositories import temp_emails as temp_emails_repo
+    from outlook_web.services import gptmail
+
+    if gptmail_count >= max_gptmail:
+        errors.append({"line": line_num, "email": email, "error": f"GPTMail 单次导入上限 {max_gptmail} 个", "detected_type": "gptmail"})
+        return False
+
+    # 检查是否已存在
+    existing = temp_emails_repo.get_temp_email_by_address(email)
+    if existing:
+        return True  # 已存在视为跳过（成功）
+
+    # 尝试可用性检查
+    try:
+        result = gptmail.get_temp_emails_from_api(email)
+        if result and result.get("success"):
+            ok = temp_emails_repo.add_temp_email(email)
+            return ok
+    except Exception:
+        pass
+
+    # API 不可用时尝试重新注册
+    try:
+        if "@" in email:
+            prefix, domain = email.rsplit("@", 1)
+            result = gptmail.generate_temp_email(prefix, domain)
+            if result and result.get("success"):
+                ok = temp_emails_repo.add_temp_email(email)
+                return ok
+    except Exception:
+        pass
+
+    # 直接添加（即使 API 不可用也保存地址）
+    ok = temp_emails_repo.add_temp_email(email)
+    return ok
+
+
+def _handle_auto_import(data: Dict[str, Any]) -> Any:
+    """处理 provider="auto" 的智能混合导入。"""
+    account_str = data.get("account_string", "")
+    duplicate_strategy = (data.get("duplicate_strategy") or "skip").strip().lower()
+    if duplicate_strategy not in ("skip", "overwrite"):
+        duplicate_strategy = "skip"
+    fallback_host = (data.get("imap_host") or "").strip()
+    try:
+        fallback_port = int(data.get("imap_port") or 993)
+    except Exception:
+        fallback_port = 993
+    explicit_group_id = data.get("group_id")
+
+    # 验证显式 group_id（如果提供）
+    use_auto_group = explicit_group_id is None
+    if not use_auto_group:
+        try:
+            explicit_group_id = int(explicit_group_id)
+        except Exception:
+            explicit_group_id = None
+            use_auto_group = True
+        if explicit_group_id is not None:
+            target_group = groups_repo.get_group_by_id(explicit_group_id)
+            if not target_group:
+                return jsonify({"success": False, "error": "指定的分组不存在"})
+            if target_group.get("is_system"):
+                return jsonify({"success": False, "error": "不能导入到系统分组"})
+
+    raw_lines = account_str.splitlines()
+    imported = 0
+    skipped = 0
+    failed = 0
+    by_provider: Dict[str, Dict[str, int]] = {}
+    groups_created: List[str] = []
+    errors: List[Dict[str, Any]] = []
+    errors_total = 0
+    max_error_details = 50
+    group_cache: Dict[str, int] = {}
+    gptmail_count = 0
+
+    for line_num, raw in enumerate(raw_lines, 1):
+        line = (raw or "").strip()
+        if not line or line.startswith("#"):
+            continue
+
+        result = _detect_line_type(line, fallback_host, fallback_port)
+
+        if result["type"] == "error":
+            failed += 1
+            errors_total += 1
+            if len(errors) < max_error_details:
+                errors.append({"line": line_num, "email": "", "error": result["error"]})
+            continue
+
+        fields = result["fields"]
+        email = fields.get("email", "").strip()
+        prov = result["provider"]
+
+        # 邮箱格式校验
+        if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            failed += 1
+            errors_total += 1
+            if len(errors) < max_error_details:
+                errors.append({"line": line_num, "email": email, "error": "邮箱格式不正确", "detected_type": result["type"]})
+            continue
+
+        # 初始化 provider 统计
+        if prov not in by_provider:
+            by_provider[prov] = {"imported": 0, "skipped": 0, "failed": 0}
+
+        # GPTMail 特殊处理：写入 temp_emails
+        if result["type"] == "gptmail":
+            from outlook_web.repositories import temp_emails as temp_emails_repo
+
+            existing_temp = temp_emails_repo.get_temp_email_by_address(email)
+            if existing_temp:
+                if duplicate_strategy == "skip":
+                    skipped += 1
+                    by_provider[prov]["skipped"] += 1
+                    continue
+                # overwrite 对 GPTMail 无意义（无凭据可更新），视为跳过
+                skipped += 1
+                by_provider[prov]["skipped"] += 1
+                continue
+
+            ok = _handle_gptmail_import(email, errors, line_num, gptmail_count)
+            if ok:
+                imported += 1
+                gptmail_count += 1
+                by_provider[prov]["imported"] += 1
+            else:
+                failed += 1
+                errors_total += 1
+                by_provider[prov]["failed"] += 1
+            continue
+
+        # 解析分组（Outlook/IMAP）
+        if use_auto_group:
+            group_id = _resolve_auto_group(prov, group_cache, groups_created)
+        else:
+            group_id = explicit_group_id
+
+        # 检查重复
+        existing = accounts_repo.get_account_by_email(email)
+        if existing:
+            if duplicate_strategy == "skip":
+                skipped += 1
+                by_provider[prov]["skipped"] += 1
+                continue
+            elif duplicate_strategy == "overwrite":
+                ok = _overwrite_account(existing, result, group_id)
+                if ok:
+                    imported += 1
+                    by_provider[prov]["imported"] += 1
+                    log_audit(
+                        "overwrite",
+                        "account",
+                        str(existing["id"]),
+                        f"覆盖更新 email={email}, provider={prov}",
+                    )
+                else:
+                    failed += 1
+                    errors_total += 1
+                    by_provider[prov]["failed"] += 1
+                    if len(errors) < max_error_details:
+                        errors.append({"line": line_num, "email": email, "error": "覆盖更新失败", "detected_type": result["type"]})
+                continue
+
+        # 新增账号
+        if result["type"] == "outlook":
+            ok = accounts_repo.add_account(
+                email_addr=email,
+                password=fields.get("password", ""),
+                client_id=fields.get("client_id", ""),
+                refresh_token=fields.get("refresh_token", ""),
+                group_id=group_id,
+                account_type="outlook",
+                provider="outlook",
+            )
+        elif result["type"] == "imap":
+            ok = accounts_repo.add_account(
+                email_addr=email,
+                password="",
+                client_id="",
+                refresh_token="",
+                group_id=group_id,
+                account_type="imap",
+                provider=prov,
+                imap_host=fields.get("imap_host", ""),
+                imap_port=fields.get("imap_port", 993),
+                imap_password=fields.get("imap_password", ""),
+            )
+        else:
+            ok = False
+
+        if ok:
+            imported += 1
+            by_provider[prov]["imported"] += 1
+        else:
+            failed += 1
+            errors_total += 1
+            by_provider[prov]["failed"] += 1
+            reason = "写入失败"
+            try:
+                exists = get_db().execute("SELECT 1 FROM accounts WHERE email = ? LIMIT 1", (email,)).fetchone()
+                if exists:
+                    reason = "邮箱已存在"
+            except Exception:
+                pass
+            if len(errors) < max_error_details:
+                errors.append({"line": line_num, "email": email, "error": reason, "detected_type": result["type"]})
+
+    summary = {
+        "mode": "auto",
+        "total_lines": len(raw_lines),
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "by_provider": by_provider,
+        "groups_created": groups_created,
+        "duplicate_strategy": duplicate_strategy,
+        "errors_total": errors_total,
+        "errors_returned": len(errors),
+        "errors_truncated": errors_total > len(errors),
+    }
+
+    success = imported > 0 or skipped > 0
+    message = f"混合导入完成：成功 {imported} 个，跳过 {skipped} 个，失败 {failed} 个"
+
+    if imported > 0 or skipped > 0:
+        log_audit(
+            "import",
+            "account",
+            None,
+            f"{message}，mode=auto，duplicate_strategy={duplicate_strategy}",
+        )
+
+    return jsonify({"success": success, "message": message, "summary": summary, "errors": errors})
 
 
 @login_required
@@ -886,20 +1322,31 @@ def api_search_accounts() -> Any:
 # ==================== 导出功能 API ====================
 
 
-def _build_export_text(accounts: List[Dict[str, Any]]) -> str:
+def _build_export_text(accounts: List[Dict[str, Any]], temp_emails: Optional[List[Dict]] = None) -> str:
+    """构建导出文本 v2：头部元信息 + 分段 + GPTMail 分段。"""
+    import io
+
     from outlook_web.services.providers import MAIL_PROVIDERS, get_provider_list
 
     outlook_lines: List[str] = []
     imap_groups: Dict[str, List[str]] = {}
+    gptmail_lines: List[str] = []
 
     for acc in accounts or []:
         atype = (acc.get("account_type") or "outlook").strip().lower()
+        prov = (acc.get("provider") or "").strip().lower()
+
+        # GPTMail 账号（如果存在于 accounts 表中）
+        if prov == "gptmail":
+            gptmail_lines.append(acc.get("email", ""))
+            continue
+
         if atype == "outlook":
             line = f"{acc.get('email','')}----{acc.get('password','')}----{acc.get('client_id','')}----{acc.get('refresh_token','')}"
             outlook_lines.append(line)
             continue
 
-        provider = (acc.get("provider") or "custom").strip().lower()
+        provider = prov or "custom"
         imap_pwd = acc.get("imap_password", "") or ""
         if provider == "custom":
             line = f"{acc.get('email','')}----{imap_pwd}----{provider}----{acc.get('imap_host','') or ''}----{acc.get('imap_port', 993) or 993}"
@@ -908,36 +1355,66 @@ def _build_export_text(accounts: List[Dict[str, Any]]) -> str:
 
         imap_groups.setdefault(provider, []).append(line)
 
-    parts: List[str] = []
+    # 追加 temp_emails 中的 GPTMail
+    for te in temp_emails or []:
+        email = te.get("email", "")
+        if email and email not in gptmail_lines:
+            gptmail_lines.append(email)
+
+    # 统计
+    total = len(outlook_lines) + sum(len(v) for v in imap_groups.values()) + len(gptmail_lines)
+    buf = io.StringIO()
+
+    # 头部元信息
+    buf.write("# ============================================\n")
+    buf.write("# Outlook Email Plus — 账号导出\n")
+    buf.write(f"# 导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    buf.write(f"# 账号总数：{total}\n")
     if outlook_lines:
-        parts.append("# === Outlook 账号 ===")
-        parts.extend(outlook_lines)
+        buf.write(f"#   Outlook：{len(outlook_lines)}\n")
+    for prov_key, lines in imap_groups.items():
+        label = (MAIL_PROVIDERS.get(prov_key, {}) or {}).get("label", prov_key)
+        buf.write(f"#   {label}：{len(lines)}\n")
+    if gptmail_lines:
+        buf.write(f"#   临时邮箱：{len(gptmail_lines)}\n")
+    buf.write("# 格式版本：v2\n")
+    buf.write("# ============================================\n")
 
+    # Outlook 分段
+    if outlook_lines:
+        buf.write("\n# === Outlook 账号 ===\n")
+        for line in outlook_lines:
+            buf.write(line + "\n")
+
+    # IMAP 分段（按 provider 排序）
     provider_order = [p.get("key") for p in get_provider_list() if p.get("key")]
-    provider_order = [p for p in provider_order if p != "outlook"]
-
+    provider_order = [p for p in provider_order if p not in ("outlook", "auto")]
     appended = set()
     for provider in provider_order:
         lines = imap_groups.get(provider) or []
         if not lines:
             continue
         label = (MAIL_PROVIDERS.get(provider, {}) or {}).get("label", provider)
-        if parts:
-            parts.append("")
-        parts.append(f"# === IMAP 账号（{label}）===")
-        parts.extend(lines)
+        buf.write(f"\n# === IMAP 账号（{label}）===\n")
+        for line in lines:
+            buf.write(line + "\n")
         appended.add(provider)
 
     for provider, lines in imap_groups.items():
         if provider in appended:
             continue
         label = (MAIL_PROVIDERS.get(provider, {}) or {}).get("label", provider)
-        if parts:
-            parts.append("")
-        parts.append(f"# === IMAP 账号（{label}）===")
-        parts.extend(lines)
+        buf.write(f"\n# === IMAP 账号（{label}）===\n")
+        for line in lines:
+            buf.write(line + "\n")
 
-    return "\n".join(parts).strip() + "\n"
+    # GPTMail 分段
+    if gptmail_lines:
+        buf.write("\n# === 临时邮箱（GPTMail）===\n")
+        for line in gptmail_lines:
+            buf.write(line + "\n")
+
+    return buf.getvalue()
 
 
 @login_required
@@ -964,16 +1441,21 @@ def api_export_all_accounts() -> Any:
     # 使用 load_accounts 获取所有账号（自动解密）
     accounts = accounts_repo.load_accounts()
 
-    if not accounts:
+    # 加载 GPTMail 临时邮箱
+    from outlook_web.repositories import temp_emails as temp_emails_repo
+
+    temp_emails = temp_emails_repo.load_temp_emails()
+
+    if not accounts and not temp_emails:
         return jsonify({"success": False, "error": "没有邮箱账号"})
 
     # 记录审计日志
-    log_audit("export", "all_accounts", None, f"导出所有账号，共 {len(accounts)} 个")
+    log_audit("export", "all_accounts", None, f"导出所有账号，共 {len(accounts)} 个账号 + {len(temp_emails)} 个临时邮箱")
 
-    content = _build_export_text(accounts)
+    content = _build_export_text(accounts, temp_emails)
 
     # 生成文件名（使用 URL 编码处理中文）
-    filename = f"all_accounts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    filename = f"accounts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     encoded_filename = quote(filename)
 
     # 返回文件下载响应
@@ -1015,7 +1497,15 @@ def api_export_selected_accounts() -> Any:
         accounts = accounts_repo.load_accounts(group_id)
         all_accounts.extend(accounts)
 
-    if not all_accounts:
+    # 仅当选中了"临时邮箱"系统分组时才附加 GPTMail
+    from outlook_web.repositories import temp_emails as temp_emails_repo
+
+    temp_emails: List[Dict] = []
+    temp_group = groups_repo.get_group_by_name("临时邮箱")
+    if temp_group and temp_group["id"] in group_ids:
+        temp_emails = temp_emails_repo.load_temp_emails()
+
+    if not all_accounts and not temp_emails:
         return jsonify({"success": False, "error": "选中的分组下没有邮箱账号"})
 
     # 记录审计日志
@@ -1023,13 +1513,13 @@ def api_export_selected_accounts() -> Any:
         "export",
         "selected_groups",
         ",".join(map(str, group_ids)),
-        f"导出选中分组的 {len(all_accounts)} 个账号",
+        f"导出选中分组的 {len(all_accounts)} 个账号 + {len(temp_emails)} 个临时邮箱",
     )
 
-    content = _build_export_text(all_accounts)
+    content = _build_export_text(all_accounts, temp_emails)
 
     # 生成文件名
-    filename = f"selected_accounts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    filename = f"accounts_export_selected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     encoded_filename = quote(filename)
 
     # 返回文件下载响应

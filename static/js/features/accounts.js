@@ -100,12 +100,44 @@
             const hint = document.getElementById('accountFormatHint');
             const customFields = document.getElementById('customImapFields');
             const getTokenBtn = document.getElementById('getRefreshTokenBtnInAdd');
+            const duplicateGroup = document.getElementById('duplicateStrategyGroup');
+            const fallbackGroup = document.getElementById('fallbackImapGroup');
+            const importGroupSelect = document.getElementById('importGroupSelect');
 
             if (!input || !hint || !customFields) return;
 
             // "获取Token"按钮仅 Outlook 类型可见
             if (getTokenBtn) {
                 getTokenBtn.style.display = (p === 'outlook') ? '' : 'none';
+            }
+
+            // 重置 auto 模式特有的 UI
+            if (duplicateGroup) duplicateGroup.style.display = 'none';
+            if (fallbackGroup) fallbackGroup.style.display = 'none';
+            if (importGroupSelect) {
+                importGroupSelect.disabled = false;
+            }
+
+            if (p === 'auto') {
+                customFields.style.display = 'none';
+                if (duplicateGroup) duplicateGroup.style.display = '';
+                if (fallbackGroup) fallbackGroup.style.display = '';
+                input.placeholder = '支持混合格式，每行一个账号...\nOutlook: 邮箱----密码----client_id----refresh_token\nIMAP: 邮箱----授权码----provider\n或: 邮箱----密码（自动识别类型）\nGPTMail: 仅邮箱地址';
+                hint.textContent = '智能识别模式：自动按每行格式和邮箱域名判断类型，自动分组';
+                if (getTokenBtn) getTokenBtn.style.display = 'none';
+                if (importGroupSelect) {
+                    importGroupSelect.disabled = true;
+                    const savedHTML = importGroupSelect.innerHTML;
+                    importGroupSelect.dataset.savedOptions = savedHTML;
+                    importGroupSelect.innerHTML = '<option value="">自动按类型分组</option>';
+                }
+                return;
+            }
+
+            // 恢复分组选择器（从 auto 切换回来时）
+            if (importGroupSelect && importGroupSelect.dataset.savedOptions) {
+                importGroupSelect.innerHTML = importGroupSelect.dataset.savedOptions;
+                delete importGroupSelect.dataset.savedOptions;
             }
 
             if (p === 'outlook') {
@@ -148,6 +180,14 @@
                 const portEl = document.getElementById('imapPort');
                 if (hostEl) hostEl.value = '';
                 if (portEl) portEl.value = '993';
+
+                // 重置 auto 模式的字段
+                const fbHostEl = document.getElementById('fallbackImapHost');
+                const fbPortEl = document.getElementById('fallbackImapPort');
+                if (fbHostEl) fbHostEl.value = '';
+                if (fbPortEl) fbPortEl.value = '993';
+                const skipRadio = document.querySelector('input[name="duplicateStrategy"][value="skip"]');
+                if (skipRadio) skipRadio.checked = true;
             });
             document.getElementById('addAccountModal').classList.add('show');
         }
@@ -171,7 +211,19 @@
 
             try {
                 const payload = { account_string: input, group_id: groupId };
-                if (provider && provider !== 'outlook') {
+
+                if (provider === 'auto') {
+                    payload.provider = 'auto';
+                    payload.group_id = null;
+                    const strategyEl = document.querySelector('input[name="duplicateStrategy"]:checked');
+                    payload.duplicate_strategy = strategyEl ? strategyEl.value : 'skip';
+                    const fbHost = (document.getElementById('fallbackImapHost')?.value || '').trim();
+                    const fbPort = parseInt(document.getElementById('fallbackImapPort')?.value || '993', 10);
+                    if (fbHost) {
+                        payload.imap_host = fbHost;
+                        payload.imap_port = fbPort || 993;
+                    }
+                } else if (provider && provider !== 'outlook') {
                     payload.provider = provider;
                     if (provider === 'custom') {
                         const host = (document.getElementById('imapHost')?.value || '').trim();
@@ -202,17 +254,44 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    showToast(data.message, 'success');
+                    // Auto 模式增强结果展示
+                    if (data.summary && data.summary.mode === 'auto') {
+                        let msg = data.message;
+                        const s = data.summary;
+                        if (s.by_provider && Object.keys(s.by_provider).length > 0) {
+                            msg += '\n\n--- 按类型统计 ---';
+                            const provNames = {outlook:'Outlook',gmail:'Gmail',qq:'QQ邮箱','163':'163邮箱','126':'126邮箱',yahoo:'Yahoo',aliyun:'阿里云邮箱',custom:'自定义IMAP',gptmail:'临时邮箱'};
+                            for (const [prov, stats] of Object.entries(s.by_provider)) {
+                                const name = provNames[prov] || prov;
+                                msg += `\n${name}：成功 ${stats.imported || 0}`;
+                                if (stats.skipped) msg += `，跳过 ${stats.skipped}`;
+                                if (stats.failed) msg += `，失败 ${stats.failed}`;
+                            }
+                        }
+                        if (s.groups_created && s.groups_created.length > 0) {
+                            msg += `\n\n✨ 自动创建分组：${s.groups_created.join('、')}`;
+                        }
+                        showToast(msg, 'success');
+                    } else {
+                        showToast(data.message, 'success');
+                    }
                     hideAddAccountModal();
 
-                    // 清除该分组的缓存
-                    delete accountsCache[groupId];
+                    // 清除缓存并刷新分组列表（可能有新分组）
+                    if (typeof accountsCache !== 'undefined') {
+                        if (provider === 'auto') {
+                            // auto 模式可能影响多个分组，清除所有缓存
+                            for (const key in accountsCache) { delete accountsCache[key]; }
+                        } else {
+                            delete accountsCache[groupId];
+                        }
+                    }
 
                     // 刷新分组列表（更新数量）
                     loadGroups();
 
                     // 如果当前选中的就是这个分组，刷新邮箱列表
-                    if (currentGroupId === groupId) {
+                    if (currentGroupId && currentGroupId === groupId) {
                         loadAccountsByGroup(groupId, true);
                     }
                 } else {
