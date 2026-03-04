@@ -45,9 +45,7 @@ def delete_temp_email(email_addr: str) -> bool:
     """删除临时邮箱及其所有邮件"""
     db = get_db()
     try:
-        db.execute(
-            "DELETE FROM temp_email_messages WHERE email_address = ?", (email_addr,)
-        )
+        db.execute("DELETE FROM temp_email_messages WHERE email_address = ?", (email_addr,))
         db.execute("DELETE FROM temp_emails WHERE email = ?", (email_addr,))
         db.commit()
         return True
@@ -103,9 +101,7 @@ def get_temp_email_messages(email_addr: str) -> List[Dict]:
 def get_temp_email_message_by_id(message_id: str) -> Optional[Dict]:
     """根据 ID 获取临时邮件"""
     db = get_db()
-    cursor = db.execute(
-        "SELECT * FROM temp_email_messages WHERE message_id = ?", (message_id,)
-    )
+    cursor = db.execute("SELECT * FROM temp_email_messages WHERE message_id = ?", (message_id,))
     row = cursor.fetchone()
     return dict(row) if row else None
 
@@ -114,9 +110,7 @@ def delete_temp_email_message(message_id: str) -> bool:
     """删除临时邮件"""
     db = get_db()
     try:
-        db.execute(
-            "DELETE FROM temp_email_messages WHERE message_id = ?", (message_id,)
-        )
+        db.execute("DELETE FROM temp_email_messages WHERE message_id = ?", (message_id,))
         db.commit()
         return True
     except Exception:

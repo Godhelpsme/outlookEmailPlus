@@ -56,22 +56,16 @@ class ErrorAndTraceTests(unittest.TestCase):
 
     def test_trace_id_can_be_propagated_from_request(self):
         client = self.app.test_client()
-        resp = client.get(
-            "/api/__not_found__", headers={"X-Trace-Id": "trace_from_test"}
-        )
+        resp = client.get("/api/__not_found__", headers={"X-Trace-Id": "trace_from_test"})
         data = resp.get_json()
         self.assertEqual(resp.headers.get("X-Trace-Id"), "trace_from_test")
         self.assertEqual(data["error"].get("trace_id"), "trace_from_test")
 
     def test_sanitize_error_details_masks_tokens(self):
-        sanitized = self.module.sanitize_error_details(
-            'Bearer abcdefg refresh_token=xyz password: "123456"'
-        )
+        sanitized = self.module.sanitize_error_details('Bearer abcdefg refresh_token=xyz password: "123456"')
         self.assertIn("Bearer ***", sanitized)
         self.assertIn("refresh_token=***", sanitized)
-        self.assertIn(
-            '"123456"', 'Bearer abcdefg refresh_token=xyz password: "123456"'
-        )  # sanity
+        self.assertIn('"123456"', 'Bearer abcdefg refresh_token=xyz password: "123456"')  # sanity
         self.assertNotIn("123456", sanitized)
 
     def test_build_error_payload_sanitizes_message_and_details(self):
@@ -253,9 +247,7 @@ class ErrorAndTraceTests(unittest.TestCase):
         login = client.post("/login", json={"password": "testpass123"})
         self.assertEqual(login.status_code, 200)
 
-        resp = client.post(
-            "/api/settings/validate-cron", json={"cron_expression": "0 2 * * *"}
-        )
+        resp = client.post("/api/settings/validate-cron", json={"cron_expression": "0 2 * * *"})
         data = resp.get_json()
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(data.get("success"), True)
@@ -419,9 +411,7 @@ class ErrorAndTraceTests(unittest.TestCase):
 
         conn = self.module.create_sqlite_connection()
         try:
-            row = conn.execute(
-                "SELECT id FROM groups WHERE is_system = 1 LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM groups WHERE is_system = 1 LIMIT 1").fetchone()
             self.assertIsNotNone(row)
             system_group_id = row["id"]
         finally:
@@ -445,9 +435,7 @@ class ErrorAndTraceTests(unittest.TestCase):
 
         conn = self.module.create_sqlite_connection()
         try:
-            system_row = conn.execute(
-                "SELECT id FROM groups WHERE is_system = 1 LIMIT 1"
-            ).fetchone()
+            system_row = conn.execute("SELECT id FROM groups WHERE is_system = 1 LIMIT 1").fetchone()
             self.assertIsNotNone(system_row)
             system_group_id = system_row["id"]
 

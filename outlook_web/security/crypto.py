@@ -30,11 +30,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def is_password_hashed(password: str) -> bool:
     """检查密码是否已经是 bcrypt 哈希值"""
-    return (
-        password.startswith("$2b$")
-        or password.startswith("$2a$")
-        or password.startswith("$2y$")
-    )
+    return password.startswith("$2b$") or password.startswith("$2a$") or password.startswith("$2y$")
 
 
 def get_encryption_key() -> bytes:

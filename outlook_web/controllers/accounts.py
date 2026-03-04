@@ -101,9 +101,7 @@ def api_get_accounts() -> Any:
             acc_id_int = int(acc_id)
         except Exception:
             acc_id_int = None
-        last_refresh_log = (
-            last_log_by_account.get(acc_id_int) if acc_id_int is not None else None
-        )
+        last_refresh_log = last_log_by_account.get(acc_id_int) if acc_id_int is not None else None
 
         safe_accounts.append(
             {
@@ -111,23 +109,15 @@ def api_get_accounts() -> Any:
                 "email": acc["email"],
                 "account_type": acc.get("account_type") or "outlook",
                 "provider": acc.get("provider") or "outlook",
-                "client_id": (
-                    acc["client_id"][:8] + "..."
-                    if len(acc["client_id"]) > 8
-                    else acc["client_id"]
-                ),
+                "client_id": (acc["client_id"][:8] + "..." if len(acc["client_id"]) > 8 else acc["client_id"]),
                 "group_id": acc.get("group_id"),
                 "group_name": acc.get("group_name", "默认分组"),
                 "group_color": acc.get("group_color", "#666666"),
                 "remark": acc.get("remark", ""),
                 "status": acc.get("status", "active"),
                 "last_refresh_at": acc.get("last_refresh_at", ""),
-                "last_refresh_status": (
-                    last_refresh_log.get("status") if last_refresh_log else None
-                ),
-                "last_refresh_error": (
-                    last_refresh_log.get("error_message") if last_refresh_log else None
-                ),
+                "last_refresh_status": (last_refresh_log.get("status") if last_refresh_log else None),
+                "last_refresh_error": (last_refresh_log.get("error_message") if last_refresh_log else None),
                 "created_at": acc.get("created_at", ""),
                 "updated_at": acc.get("updated_at", ""),
                 "tags": acc.get("tags", []),
@@ -275,9 +265,7 @@ def api_add_account() -> Any:
                 failed += 1
                 errors_total += 1
                 if len(errors) < max_error_details:
-                    errors.append(
-                        {"line": line_no, "email": email_addr, "error": "邮箱格式不正确"}
-                    )
+                    errors.append({"line": line_no, "email": email_addr, "error": "邮箱格式不正确"})
                 continue
 
             imap_host = default_imap_host
@@ -370,9 +358,7 @@ def api_add_account() -> Any:
             errors_total += 1
             reason = "写入失败"
             try:
-                exists = db.execute(
-                    "SELECT 1 FROM accounts WHERE email = ? LIMIT 1", (email_addr,)
-                ).fetchone()
+                exists = db.execute("SELECT 1 FROM accounts WHERE email = ? LIMIT 1", (email_addr,)).fetchone()
                 if exists:
                     reason = "邮箱已存在"
             except Exception:
@@ -407,13 +393,9 @@ def api_add_account() -> Any:
                 None,
                 f"{message}，目标分组ID={group_id}，provider={provider}",
             )
-            return jsonify(
-                {"success": True, "message": message, "summary": summary, "errors": errors}
-            )
+            return jsonify({"success": True, "message": message, "summary": summary, "errors": errors})
 
-        return jsonify(
-            {"success": False, "error": message, "summary": summary, "errors": errors}
-        )
+        return jsonify({"success": False, "error": message, "summary": summary, "errors": errors})
 
     # -------------------- Outlook（旧格式）导入分支：保持现有逻辑完全不动 --------------------
     for line_no, raw in enumerate(raw_lines, start=1):
@@ -459,9 +441,7 @@ def api_add_account() -> Any:
             failed += 1
             errors_total += 1
             if len(errors) < max_error_details:
-                errors.append(
-                    {"line": line_no, "email": email_addr, "error": "邮箱格式不正确"}
-                )
+                errors.append({"line": line_no, "email": email_addr, "error": "邮箱格式不正确"})
             continue
 
         ok = accounts_repo.add_account(
@@ -481,9 +461,7 @@ def api_add_account() -> Any:
         errors_total += 1
         reason = "写入失败"
         try:
-            exists = db.execute(
-                "SELECT 1 FROM accounts WHERE email = ? LIMIT 1", (email_addr,)
-            ).fetchone()
+            exists = db.execute("SELECT 1 FROM accounts WHERE email = ? LIMIT 1", (email_addr,)).fetchone()
             if exists:
                 reason = "邮箱已存在"
         except Exception:
@@ -513,13 +491,9 @@ def api_add_account() -> Any:
                 pass
             return jsonify({"success": False, "error": "数据库写入失败，请重试"})
         log_audit("import", "account", None, f"{message}，目标分组ID={group_id}")
-        return jsonify(
-            {"success": True, "message": message, "summary": summary, "errors": errors}
-        )
+        return jsonify({"success": True, "message": message, "summary": summary, "errors": errors})
 
-    return jsonify(
-        {"success": False, "error": message, "summary": summary, "errors": errors}
-    )
+    return jsonify({"success": False, "error": message, "summary": summary, "errors": errors})
 
 
 @login_required
@@ -631,9 +605,7 @@ def api_delete_account(account_id: int) -> Any:
     email_addr = ""
     try:
         db = get_db()
-        row = db.execute(
-            "SELECT email FROM accounts WHERE id = ?", (account_id,)
-        ).fetchone()
+        row = db.execute("SELECT email FROM accounts WHERE id = ?", (account_id,)).fetchone()
         email_addr = row["email"] if row else ""
     except Exception:
         email_addr = ""
@@ -682,9 +654,7 @@ def api_batch_delete_accounts() -> Any:
         try:
             # 获取邮箱地址用于审计日志
             db = get_db()
-            row = db.execute(
-                "SELECT email FROM accounts WHERE id = ?", (account_id,)
-            ).fetchone()
+            row = db.execute("SELECT email FROM accounts WHERE id = ?", (account_id,)).fetchone()
             email_addr = row["email"] if row else ""
 
             if accounts_repo.delete_account_by_id(account_id):
@@ -703,8 +673,7 @@ def api_batch_delete_accounts() -> Any:
     return jsonify(
         {
             "success": True,
-            "message": f"成功删除 {deleted_count} 个账号"
-            + (f"，失败 {failed_count} 个" if failed_count > 0 else ""),
+            "message": f"成功删除 {deleted_count} 个账号" + (f"，失败 {failed_count} 个" if failed_count > 0 else ""),
             "deleted_count": deleted_count,
             "failed_count": failed_count,
         }
@@ -828,9 +797,7 @@ def api_search_accounts() -> Any:
     # 批量加载标签与最后刷新状态，避免 N+1 查询
     account_rows: List[Dict[str, Any]] = [dict(r) for r in rows]
     try:
-        account_ids = [
-            int(a.get("id")) for a in account_rows if a.get("id") is not None
-        ]
+        account_ids = [int(a.get("id")) for a in account_rows if a.get("id") is not None]
     except Exception:
         account_ids = []
 
@@ -891,9 +858,7 @@ def api_search_accounts() -> Any:
             acc_id_int = None
 
         tags = tags_by_account.get(acc_id_int, []) if acc_id_int is not None else []
-        last_refresh_log = (
-            last_log_by_account.get(acc_id_int) if acc_id_int is not None else None
-        )
+        last_refresh_log = last_log_by_account.get(acc_id_int) if acc_id_int is not None else None
 
         safe_accounts.append(
             {
@@ -901,11 +866,7 @@ def api_search_accounts() -> Any:
                 "email": acc["email"],
                 "account_type": acc.get("account_type") or "outlook",
                 "provider": acc.get("provider") or "outlook",
-                "client_id": (
-                    acc["client_id"][:8] + "..."
-                    if len(acc["client_id"]) > 8
-                    else acc["client_id"]
-                ),
+                "client_id": (acc["client_id"][:8] + "..." if len(acc["client_id"]) > 8 else acc["client_id"]),
                 "group_id": acc["group_id"],
                 "group_name": acc["group_name"] if acc["group_name"] else "默认分组",
                 "group_color": acc["group_color"] if acc["group_color"] else "#666666",
@@ -914,12 +875,8 @@ def api_search_accounts() -> Any:
                 "created_at": acc["created_at"] if acc["created_at"] else "",
                 "updated_at": acc["updated_at"] if acc["updated_at"] else "",
                 "tags": tags,
-                "last_refresh_status": (
-                    last_refresh_log.get("status") if last_refresh_log else None
-                ),
-                "last_refresh_error": (
-                    last_refresh_log.get("error_message") if last_refresh_log else None
-                ),
+                "last_refresh_status": (last_refresh_log.get("status") if last_refresh_log else None),
+                "last_refresh_error": (last_refresh_log.get("error_message") if last_refresh_log else None),
             }
         )
 
@@ -927,6 +884,7 @@ def api_search_accounts() -> Any:
 
 
 # ==================== 导出功能 API ====================
+
 
 def _build_export_text(accounts: List[Dict[str, Any]]) -> str:
     from outlook_web.services.providers import MAIL_PROVIDERS, get_provider_list
@@ -1022,9 +980,7 @@ def api_export_all_accounts() -> Any:
     return Response(
         content,
         mimetype="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-        },
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 
@@ -1080,9 +1036,7 @@ def api_export_selected_accounts() -> Any:
     return Response(
         content,
         mimetype="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-        },
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 
@@ -1151,25 +1105,15 @@ def api_refresh_account(account_id: int) -> Any:
 
     # 解密 refresh_token
     try:
-        refresh_token = (
-            decrypt_data(encrypted_refresh_token)
-            if encrypted_refresh_token
-            else encrypted_refresh_token
-        )
+        refresh_token = decrypt_data(encrypted_refresh_token) if encrypted_refresh_token else encrypted_refresh_token
     except Exception as e:
         error_msg = f"解密 token 失败: {str(e)}"
-        refresh_logs_repo.log_refresh_result(
-            account_id, account_email, "manual", "failed", error_msg
-        )
-        error_payload = build_error_payload(
-            "TOKEN_DECRYPT_FAILED", "Token 解密失败", "DecryptionError", 500, error_msg
-        )
+        refresh_logs_repo.log_refresh_result(account_id, account_email, "manual", "failed", error_msg)
+        error_payload = build_error_payload("TOKEN_DECRYPT_FAILED", "Token 解密失败", "DecryptionError", 500, error_msg)
         return jsonify({"success": False, "error": error_payload})
 
     # 测试 refresh token
-    success, error_msg = graph_service.test_refresh_token(
-        client_id, refresh_token, proxy_url
-    )
+    success, error_msg = graph_service.test_refresh_token(client_id, refresh_token, proxy_url)
 
     # 记录刷新结果
     refresh_logs_repo.log_refresh_result(
@@ -1258,9 +1202,7 @@ def api_trigger_scheduled_refresh() -> Any:
     requested_by_user_agent = get_user_agent()
 
     # 获取配置
-    refresh_interval_days = int(
-        settings_repo.get_setting("refresh_interval_days", "30")
-    )
+    refresh_interval_days = int(settings_repo.get_setting("refresh_interval_days", "30"))
     use_cron = settings_repo.get_setting("use_cron_schedule", "false").lower() == "true"
 
     # 执行刷新（使用流式响应）

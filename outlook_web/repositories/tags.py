@@ -17,9 +17,7 @@ def add_tag(name: str, color: str) -> Optional[int]:
     """添加标签"""
     db = get_db()
     try:
-        cursor = db.execute(
-            "INSERT INTO tags (name, color) VALUES (?, ?)", (name, color)
-        )
+        cursor = db.execute("INSERT INTO tags (name, color) VALUES (?, ?)", (name, color))
         db.commit()
         return cursor.lastrowid
     except sqlite3.IntegrityError:

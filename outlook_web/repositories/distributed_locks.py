@@ -67,9 +67,7 @@ def acquire_distributed_lock(
         return False, {"error": str(e)}
 
 
-def release_distributed_lock(
-    conn: sqlite3.Connection, name: str, owner_id: str
-) -> bool:
+def release_distributed_lock(conn: sqlite3.Connection, name: str, owner_id: str) -> bool:
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(

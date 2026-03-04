@@ -61,9 +61,7 @@ def handle_exception(error):
     try:
         from flask import current_app
 
-        current_app.logger.exception(
-            "Unhandled exception trace_id=%s", trace_id_value or "unknown"
-        )
+        current_app.logger.exception("Unhandled exception trace_id=%s", trace_id_value or "unknown")
     except Exception:
         pass
 

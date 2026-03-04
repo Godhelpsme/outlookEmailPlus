@@ -24,9 +24,7 @@ class MaskingAuditAndImportTests(unittest.TestCase):
     def _default_group_id(self) -> int:
         conn = self.module.create_sqlite_connection()
         try:
-            row = conn.execute(
-                "SELECT id FROM groups WHERE name = '默认分组' LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM groups WHERE name = '默认分组' LIMIT 1").fetchone()
             return row["id"] if row else 1
         finally:
             conn.close()
@@ -100,9 +98,7 @@ class MaskingAuditAndImportTests(unittest.TestCase):
 
         conn = self.module.create_sqlite_connection()
         try:
-            row = conn.execute(
-                "SELECT id, name FROM groups WHERE is_system = 1 LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id, name FROM groups WHERE is_system = 1 LIMIT 1").fetchone()
             self.assertIsNotNone(row)
             system_group_id = row["id"]
             system_group_name = row["name"]
@@ -203,12 +199,7 @@ class MaskingAuditAndImportTests(unittest.TestCase):
         self.assertEqual(data.get("success"), True)
 
         logs = data.get("logs") or []
-        matched = [
-            r
-            for r in logs
-            if str(r.get("resource_id")) == str(group_id)
-            and group_name in (r.get("details") or "")
-        ]
+        matched = [r for r in logs if str(r.get("resource_id")) == str(group_id) and group_name in (r.get("details") or "")]
         self.assertTrue(matched)
         self.assertTrue(matched[0].get("trace_id"))
 
@@ -223,25 +214,19 @@ class MaskingAuditAndImportTests(unittest.TestCase):
         # 注意：控制器现在直接使用 gptmail service，需要 mock outlook_web.services.gptmail
         from outlook_web.services import gptmail as gptmail_service
 
-        with patch.object(
-            gptmail_service, "generate_temp_email", return_value=(email_addr, None)
-        ):
+        with patch.object(gptmail_service, "generate_temp_email", return_value=(email_addr, None)):
             resp = client.post("/api/temp-emails/generate", json={})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json().get("success"), True)
 
-        create_audit = client.get(
-            "/api/audit-logs?resource_type=temp_email&action=create&limit=200"
-        )
+        create_audit = client.get("/api/audit-logs?resource_type=temp_email&action=create&limit=200")
         self.assertEqual(create_audit.status_code, 200)
         create_data = create_audit.get_json()
         self.assertEqual(create_data.get("success"), True)
         create_logs = create_data.get("logs") or []
         self.assertTrue([r for r in create_logs if r.get("resource_id") == email_addr])
 
-        with patch.object(
-            gptmail_service, "clear_temp_emails_from_api", return_value=True
-        ):
+        with patch.object(gptmail_service, "clear_temp_emails_from_api", return_value=True):
             conn = self.module.create_sqlite_connection()
             try:
                 conn.execute(
@@ -259,9 +244,7 @@ class MaskingAuditAndImportTests(unittest.TestCase):
         self.assertEqual(clear_resp.status_code, 200)
         self.assertEqual(clear_resp.get_json().get("success"), True)
 
-        audit_resp = client.get(
-            "/api/audit-logs?resource_type=temp_email_messages&action=delete&limit=200"
-        )
+        audit_resp = client.get("/api/audit-logs?resource_type=temp_email_messages&action=delete&limit=200")
         self.assertEqual(audit_resp.status_code, 200)
         audit = audit_resp.get_json()
         self.assertEqual(audit.get("success"), True)

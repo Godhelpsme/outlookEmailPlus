@@ -72,9 +72,7 @@ def api_get_emails(email_addr: str) -> Any:
     all_errors = {}
 
     # 1. 尝试 Graph API
-    graph_result = graph_service.get_emails_graph(
-        account["client_id"], account["refresh_token"], folder, skip, top, proxy_url
-    )
+    graph_result = graph_service.get_emails_graph(account["client_id"], account["refresh_token"], folder, skip, top, proxy_url)
     if graph_result.get("success"):
         emails = graph_result.get("emails", [])
         # 更新刷新时间
@@ -96,9 +94,7 @@ def api_get_emails(email_addr: str) -> Any:
                 {
                     "id": e.get("id"),
                     "subject": e.get("subject", "无主题"),
-                    "from": e.get("from", {})
-                    .get("emailAddress", {})
-                    .get("address", "未知"),
+                    "from": e.get("from", {}).get("emailAddress", {}).get("address", "未知"),
                     "date": e.get("receivedDateTime", ""),
                     "is_read": e.get("isRead", False),
                     "has_attachments": e.get("hasAttachments", False),
@@ -236,13 +232,9 @@ def api_delete_emails() -> Any:
             f"删除邮件 {len(message_ids)} 封（Graph API）",
         )
     elif method_used == "imap_new":
-        log_audit(
-            "delete", "email", email_addr, f"删除邮件 {len(message_ids)} 封（IMAP New）"
-        )
+        log_audit("delete", "email", email_addr, f"删除邮件 {len(message_ids)} 封（IMAP New）")
     elif method_used == "imap_old":
-        log_audit(
-            "delete", "email", email_addr, f"删除邮件 {len(message_ids)} 封（IMAP Old）"
-        )
+        log_audit("delete", "email", email_addr, f"删除邮件 {len(message_ids)} 封（IMAP Old）")
 
     return jsonify(response_data)
 
@@ -287,9 +279,7 @@ def api_get_email_detail(email_addr: str, message_id: str) -> Any:
             if group:
                 proxy_url = group.get("proxy_url", "") or ""
 
-        detail = graph_service.get_email_detail_graph(
-            account["client_id"], account["refresh_token"], message_id, proxy_url
-        )
+        detail = graph_service.get_email_detail_graph(account["client_id"], account["refresh_token"], message_id, proxy_url)
         if detail:
             return jsonify(
                 {
@@ -297,20 +287,12 @@ def api_get_email_detail(email_addr: str, message_id: str) -> Any:
                     "email": {
                         "id": detail.get("id"),
                         "subject": detail.get("subject", "无主题"),
-                        "from": detail.get("from", {})
-                        .get("emailAddress", {})
-                        .get("address", "未知"),
+                        "from": detail.get("from", {}).get("emailAddress", {}).get("address", "未知"),
                         "to": ", ".join(
-                            [
-                                r.get("emailAddress", {}).get("address", "")
-                                for r in detail.get("toRecipients", [])
-                            ]
+                            [r.get("emailAddress", {}).get("address", "") for r in detail.get("toRecipients", [])]
                         ),
                         "cc": ", ".join(
-                            [
-                                r.get("emailAddress", {}).get("address", "")
-                                for r in detail.get("ccRecipients", [])
-                            ]
+                            [r.get("emailAddress", {}).get("address", "") for r in detail.get("ccRecipients", [])]
                         ),
                         "date": detail.get("receivedDateTime", ""),
                         "body": detail.get("body", {}).get("content", ""),
@@ -438,9 +420,7 @@ def api_extract_verification(email_addr: str) -> Any:
             )
             return jsonify({"success": False, "error": error_payload}), 404
         except Exception as e:
-            error_payload = build_error_payload(
-                "EXTRACT_ERROR", "提取失败", "ExtractError", 500, str(e)
-            )
+            error_payload = build_error_payload("EXTRACT_ERROR", "提取失败", "ExtractError", 500, str(e))
             return jsonify({"success": False, "error": error_payload}), 500
 
     # 获取分组代理设置
@@ -521,15 +501,11 @@ def api_extract_verification(email_addr: str) -> Any:
             pass
 
     if not emails:
-        error_payload = build_error_payload(
-            "EMAIL_NOT_FOUND", "未找到邮件", "NotFoundError", 404, f"email={email_addr}"
-        )
+        error_payload = build_error_payload("EMAIL_NOT_FOUND", "未找到邮件", "NotFoundError", 404, f"email={email_addr}")
         return jsonify({"success": False, "error": error_payload}), 404
 
     # 按时间排序，取最新的一封
-    emails.sort(
-        key=lambda x: x.get("receivedDateTime", "") or x.get("date", ""), reverse=True
-    )
+    emails.sort(key=lambda x: x.get("receivedDateTime", "") or x.get("date", ""), reverse=True)
     latest_email = emails[0]
 
     # 获取邮件详情以获取完整内容
@@ -562,24 +538,15 @@ def api_extract_verification(email_addr: str) -> Any:
     # 构建邮件对象用于提取
     email_obj = {
         "subject": latest_email.get("subject", ""),
-        "body_preview": latest_email.get("bodyPreview", "")
-        or latest_email.get("body_preview", ""),
+        "body_preview": latest_email.get("bodyPreview", "") or latest_email.get("body_preview", ""),
     }
 
     if email_detail:
         # Graph API 格式
         if "body" in email_detail:
             body_content = email_detail.get("body", {})
-            email_obj["body"] = (
-                body_content.get("content", "")
-                if body_content.get("contentType") == "text"
-                else ""
-            )
-            email_obj["body_html"] = (
-                body_content.get("content", "")
-                if body_content.get("contentType") == "html"
-                else ""
-            )
+            email_obj["body"] = body_content.get("content", "") if body_content.get("contentType") == "text" else ""
+            email_obj["body_html"] = body_content.get("content", "") if body_content.get("contentType") == "html" else ""
             email_obj["bodyContent"] = body_content.get("content", "")
             email_obj["bodyContentType"] = body_content.get("contentType", "text")
         # IMAP 格式
@@ -606,7 +573,5 @@ def api_extract_verification(email_addr: str) -> Any:
 
     except Exception as e:
         # 其他错误
-        error_payload = build_error_payload(
-            "EXTRACT_ERROR", "提取失败", "ExtractError", 500, str(e)
-        )
+        error_payload = build_error_payload("EXTRACT_ERROR", "提取失败", "ExtractError", 500, str(e))
         return jsonify({"success": False, "error": error_payload}), 500

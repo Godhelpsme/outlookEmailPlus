@@ -77,11 +77,7 @@ def build_error_payload(
     # - 5xx: ERROR（服务端错误）
     # - 4xx: WARNING（客户端错误，如验证失败、权限不足等，属于正常业务流程）
     # - 其他: INFO
-    log_level = (
-        logging.ERROR
-        if status >= 500
-        else (logging.WARNING if status >= 400 else logging.INFO)
-    )
+    log_level = logging.ERROR if status >= 500 else (logging.WARNING if status >= 400 else logging.INFO)
 
     try:
         current_app.logger.log(

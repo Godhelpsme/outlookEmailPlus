@@ -78,9 +78,7 @@ def get_default_group_id() -> int:
     """获取默认分组 ID（不依赖固定 id=1，增强兼容性）"""
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT id FROM groups WHERE name = '默认分组' LIMIT 1"
-        ).fetchone()
+        row = db.execute("SELECT id FROM groups WHERE name = '默认分组' LIMIT 1").fetchone()
         return row["id"] if row else 1
     except Exception:
         return 1
@@ -90,9 +88,7 @@ def delete_group(group_id: int) -> bool:
     """删除分组（将该分组下的邮箱移到默认分组）"""
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT id, name, is_system FROM groups WHERE id = ?", (group_id,)
-        ).fetchone()
+        row = db.execute("SELECT id, name, is_system FROM groups WHERE id = ?", (group_id,)).fetchone()
         if not row:
             return False
         if row["is_system"]:
@@ -116,8 +112,6 @@ def delete_group(group_id: int) -> bool:
 def get_group_account_count(group_id: int) -> int:
     """获取分组下的邮箱数量"""
     db = get_db()
-    cursor = db.execute(
-        "SELECT COUNT(*) as count FROM accounts WHERE group_id = ?", (group_id,)
-    )
+    cursor = db.execute("SELECT COUNT(*) as count FROM accounts WHERE group_id = ?", (group_id,))
     row = cursor.fetchone()
     return row["count"] if row else 0

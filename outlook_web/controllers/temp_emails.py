@@ -39,18 +39,14 @@ def api_generate_temp_email() -> Any:
         if temp_emails_repo.add_temp_email(email_addr):
             log_audit("create", "temp_email", email_addr, "生成临时邮箱")
             logger.info(f"临时邮箱生成成功: {email_addr}")
-            return jsonify(
-                {"success": True, "email": email_addr, "message": "临时邮箱创建成功"}
-            )
+            return jsonify({"success": True, "email": email_addr, "message": "临时邮箱创建成功"})
         else:
             logger.warning(f"临时邮箱已存在: {email_addr}")
             return jsonify({"success": False, "error": "邮箱已存在"})
     else:
         # 生成失败，返回详细错误信息
         logger.error(f"临时邮箱生成失败: {error_msg}, prefix={prefix}, domain={domain}")
-        return jsonify(
-            {"success": False, "error": error_msg or "生成临时邮箱失败，请稍后重试"}
-        )
+        return jsonify({"success": False, "error": error_msg or "生成临时邮箱失败，请稍后重试"})
 
 
 @login_required
@@ -117,11 +113,7 @@ def api_get_temp_email_message_detail(email_addr: str, message_id: str) -> Any:
                     "from": msg.get("from_address", "未知"),
                     "to": email_addr,
                     "subject": msg.get("subject", "无主题"),
-                    "body": (
-                        msg.get("html_content")
-                        if msg.get("has_html")
-                        else msg.get("content", "")
-                    ),
+                    "body": (msg.get("html_content") if msg.get("has_html") else msg.get("content", "")),
                     "body_type": "html" if msg.get("has_html") else "text",
                     "date": msg.get("created_at", ""),
                     "timestamp": msg.get("timestamp", 0),
@@ -159,9 +151,7 @@ def api_clear_temp_email_messages(email_addr: str) -> Any:
             (email_addr,),
         ).fetchone()
         deleted_count = row["c"] if row else 0
-        db.execute(
-            "DELETE FROM temp_email_messages WHERE email_address = ?", (email_addr,)
-        )
+        db.execute("DELETE FROM temp_email_messages WHERE email_address = ?", (email_addr,))
         db.commit()
         log_audit(
             "delete",

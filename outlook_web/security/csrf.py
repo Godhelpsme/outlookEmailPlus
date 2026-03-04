@@ -11,9 +11,7 @@ except ImportError:  # pragma: no cover
     CSRFProtect = None  # type: ignore
     _generate_csrf = None  # type: ignore
     CSRF_AVAILABLE = False
-    print(
-        "Warning: flask-wtf not installed. CSRF protection is disabled. Install with: pip install flask-wtf"
-    )
+    print("Warning: flask-wtf not installed. CSRF protection is disabled. Install with: pip install flask-wtf")
 
 
 def generate_csrf():

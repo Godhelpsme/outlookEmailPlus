@@ -85,9 +85,7 @@ def api_add_group() -> Any:
     group_id = groups_repo.add_group(name, description, color, proxy_url)
     if group_id:
         log_audit("create", "group", str(group_id), f"创建分组：{name}")
-        return jsonify(
-            {"success": True, "message": "分组创建成功", "group_id": group_id}
-        )
+        return jsonify({"success": True, "message": "分组创建成功", "group_id": group_id})
     else:
         return jsonify({"success": False, "error": "分组名称已存在"})
 
@@ -227,16 +225,12 @@ def api_export_group(group_id: int) -> Any:
     content = "\n".join(lines)
 
     # 生成文件名（使用 URL 编码处理中文）
-    filename = (
-        f"{group['name']}_accounts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    )
+    filename = f"{group['name']}_accounts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     encoded_filename = quote(filename)
 
     # 返回文件下载响应
     return Response(
         content,
         mimetype="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-        },
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )

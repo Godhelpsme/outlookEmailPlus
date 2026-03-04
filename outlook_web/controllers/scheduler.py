@@ -29,16 +29,9 @@ def api_get_scheduler_status() -> Any:
     """获取调度器/定时刷新状态（用于验证"看起来已开启但实际未运行"的问题）"""
     conn = create_sqlite_connection()
     try:
-        enable_scheduled = (
-            settings_repo.get_setting("enable_scheduled_refresh", "true").lower()
-            == "true"
-        )
-        use_cron = (
-            settings_repo.get_setting("use_cron_schedule", "false").lower() == "true"
-        )
-        refresh_interval_days = int(
-            settings_repo.get_setting("refresh_interval_days", "30")
-        )
+        enable_scheduled = settings_repo.get_setting("enable_scheduled_refresh", "true").lower() == "true"
+        use_cron = settings_repo.get_setting("use_cron_schedule", "false").lower() == "true"
+        refresh_interval_days = int(settings_repo.get_setting("refresh_interval_days", "30"))
         refresh_cron = settings_repo.get_setting("refresh_cron", "0 2 * * *")
 
         # 心跳
@@ -54,11 +47,7 @@ def api_get_scheduler_status() -> Any:
         heartbeat_age_seconds = None
         if heartbeat_row:
             try:
-                heartbeat = (
-                    json.loads(heartbeat_row["value"])
-                    if heartbeat_row["value"]
-                    else None
-                )
+                heartbeat = json.loads(heartbeat_row["value"]) if heartbeat_row["value"] else None
             except Exception:
                 heartbeat = {"raw": heartbeat_row["value"]}
             try:
@@ -143,11 +132,7 @@ def api_get_scheduler_status() -> Any:
                 ).fetchone()
                 last_finished_at = row["finished_at"] if row else None
                 try:
-                    last_time = (
-                        datetime.fromisoformat(last_finished_at)
-                        if last_finished_at
-                        else None
-                    )
+                    last_time = datetime.fromisoformat(last_finished_at) if last_finished_at else None
                 except Exception:
                     last_time = None
 
@@ -168,9 +153,7 @@ def api_get_scheduler_status() -> Any:
                     "future_runs": future_runs,
                     "next_due": next_due,
                     "heartbeat": heartbeat,
-                    "heartbeat_updated_at": (
-                        heartbeat_row["updated_at"] if heartbeat_row else None
-                    ),
+                    "heartbeat_updated_at": (heartbeat_row["updated_at"] if heartbeat_row else None),
                     "heartbeat_age_seconds": heartbeat_age_seconds,
                 },
                 "refresh": {

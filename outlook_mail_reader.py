@@ -57,9 +57,7 @@ def decode_header_value(header_value: str) -> str:
         for part, charset in decoded_parts:
             if isinstance(part, bytes):
                 try:
-                    decoded_string += part.decode(
-                        charset if charset else "utf-8", "replace"
-                    )
+                    decoded_string += part.decode(charset if charset else "utf-8", "replace")
                 except (LookupError, UnicodeDecodeError):
                     decoded_string += part.decode("utf-8", "replace")
             else:
@@ -104,9 +102,7 @@ def print_email_info(emails: List[Any], method_name: str):
 # ==================== 方式1: 旧版 IMAP 方式 ====================
 
 
-def get_access_token_old(
-    account: str, client_id: str, refresh_token: str
-) -> Optional[str]:
+def get_access_token_old(account: str, client_id: str, refresh_token: str) -> Optional[str]:
     """
     旧版方式获取 access_token
     使用 login.live.com 端点
@@ -139,9 +135,7 @@ def get_access_token_old(
         return None
 
 
-def read_emails_imap_old(
-    account: str, client_id: str, refresh_token: str, top: int = 10
-) -> Optional[List]:
+def read_emails_imap_old(account: str, client_id: str, refresh_token: str, top: int = 10) -> Optional[List]:
     """
     方式1: 旧版 IMAP 方式读取邮件
     使用 outlook.office365.com 服务器
@@ -217,9 +211,7 @@ def get_access_token_imap(client_id: str, refresh_token: str) -> Optional[str]:
     try:
         proxies = None
         if PROXY:
-            proxies = {
-                "all": f"http://{PROXY}" if not PROXY.startswith("http") else PROXY
-            }
+            proxies = {"all": f"http://{PROXY}" if not PROXY.startswith("http") else PROXY}
 
         res = requests.post(
             TOKEN_URL_IMAP,
@@ -250,9 +242,7 @@ def get_access_token_imap(client_id: str, refresh_token: str) -> Optional[str]:
         return None
 
 
-def read_emails_imap_new(
-    account: str, client_id: str, refresh_token: str, top: int = 10
-) -> Optional[List]:
+def read_emails_imap_new(account: str, client_id: str, refresh_token: str, top: int = 10) -> Optional[List]:
     """
     方式2: 新版 IMAP 方式读取邮件
     使用 outlook.live.com 服务器
@@ -328,9 +318,7 @@ def get_access_token_graph(client_id: str, refresh_token: str) -> Optional[str]:
     try:
         proxies = None
         if PROXY:
-            proxies = {
-                "all": f"http://{PROXY}" if not PROXY.startswith("http") else PROXY
-            }
+            proxies = {"all": f"http://{PROXY}" if not PROXY.startswith("http") else PROXY}
 
         res = requests.post(
             TOKEN_URL_GRAPH,
@@ -361,9 +349,7 @@ def get_access_token_graph(client_id: str, refresh_token: str) -> Optional[str]:
         return None
 
 
-def read_emails_graph(
-    client_id: str, refresh_token: str, top: int = 10
-) -> Optional[List[Dict]]:
+def read_emails_graph(client_id: str, refresh_token: str, top: int = 10) -> Optional[List[Dict]]:
     """
     方式3: Graph API 方式读取邮件
     使用 Microsoft Graph API
@@ -395,9 +381,7 @@ def read_emails_graph(
             "Prefer": "outlook.body-content-type='text'",
         }
 
-        res = requests.get(
-            url, headers=headers, params=params, proxies=proxies, timeout=30
-        )
+        res = requests.get(url, headers=headers, params=params, proxies=proxies, timeout=30)
 
         if res.status_code != 200:
             print(f"  ❌ Graph API 调用失败: {res.status_code}")

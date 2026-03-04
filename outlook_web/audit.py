@@ -8,9 +8,7 @@ from outlook_web.db import get_db
 from outlook_web.security.auth import get_client_ip
 
 
-def log_audit(
-    action: str, resource_type: str, resource_id: str = None, details: str = None
-):
+def log_audit(action: str, resource_type: str, resource_id: str = None, details: str = None):
     """
     记录审计日志
     :param action: 操作类型（如 'export', 'delete', 'update'）
@@ -64,9 +62,7 @@ def query_audit_logs(
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    total_row = db.execute(
-        f"SELECT COUNT(*) as c FROM audit_logs {where_sql}", params
-    ).fetchone()
+    total_row = db.execute(f"SELECT COUNT(*) as c FROM audit_logs {where_sql}", params).fetchone()
     total = total_row["c"] if total_row else 0
 
     rows = db.execute(

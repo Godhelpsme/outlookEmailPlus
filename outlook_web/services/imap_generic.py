@@ -24,9 +24,7 @@ def decode_header_value(header_value: str) -> str:
         for part, charset in decoded_parts:
             if isinstance(part, bytes):
                 try:
-                    decoded_string += part.decode(
-                        charset if charset else "utf-8", "replace"
-                    )
+                    decoded_string += part.decode(charset if charset else "utf-8", "replace")
                 except (LookupError, UnicodeDecodeError):
                     decoded_string += part.decode("utf-8", "replace")
             else:
@@ -227,13 +225,13 @@ def get_emails_imap_generic(
             mail.login(email_addr, imap_password)
             _LOGGER.info("imap_login_ok email=%s provider=%s", email_addr, provider)
         except imaplib.IMAP4.error as e:
-            _LOGGER.warning("imap_login_failed email=%s provider=%s err=%s", email_addr, provider, sanitize_error_details(str(e)))
+            _LOGGER.warning(
+                "imap_login_failed email=%s provider=%s err=%s", email_addr, provider, sanitize_error_details(str(e))
+            )
             message = sanitize_error_details(str(e)) or "IMAP 认证失败"
             provider_key = (provider or "").strip().lower()
             if provider_key == "gmail":
-                message = (
-                    "IMAP 认证失败：Gmail 通常需要“应用专用密码”（非登录密码），并在 Gmail 设置中开启 IMAP"
-                )
+                message = "IMAP 认证失败：Gmail 通常需要“应用专用密码”（非登录密码），并在 Gmail 设置中开启 IMAP"
 
             return {
                 "success": False,
@@ -252,7 +250,10 @@ def get_emails_imap_generic(
         if not selected:
             _LOGGER.warning(
                 "imap_folder_not_found email=%s provider=%s folder=%s candidates=%s",
-                email_addr, provider, folder, candidates,
+                email_addr,
+                provider,
+                folder,
+                candidates,
             )
             return {
                 "success": False,
@@ -326,9 +327,7 @@ def get_emails_imap_generic(
 
                 emails_data.append(
                     {
-                        "id": uid.decode("utf-8", errors="ignore")
-                        if isinstance(uid, (bytes, bytearray))
-                        else str(uid),
+                        "id": uid.decode("utf-8", errors="ignore") if isinstance(uid, (bytes, bytearray)) else str(uid),
                         "subject": subject,
                         "from": from_text,
                         "date": date_text,

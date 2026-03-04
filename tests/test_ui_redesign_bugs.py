@@ -50,9 +50,7 @@ class TestUIRedesignBugFixes(unittest.TestCase):
         client = self._get_client()
         resp = client.get("/static/js/features/accounts.js")
         js = resp.data.decode("utf-8")
-        self.assertIn(
-            "currentAccountBar", js, "selectAccount() 应操作 #currentAccountBar 元素"
-        )
+        self.assertIn("currentAccountBar", js, "selectAccount() 应操作 #currentAccountBar 元素")
 
     # ==================== BUG-003: 设置页面 ====================
 
@@ -61,9 +59,7 @@ class TestUIRedesignBugFixes(unittest.TestCase):
         client = self._get_client()
         resp = client.get("/")
         html = resp.data.decode("utf-8")
-        settings_section = re.search(
-            r'id="page-settings".*?(?=id="page-|$)', html, re.DOTALL
-        )
+        settings_section = re.search(r'id="page-settings".*?(?=id="page-|$)', html, re.DOTALL)
         self.assertIsNotNone(settings_section, "找不到 page-settings 区域")
 
     def test_bug003_navigate_triggers_settings_load(self):
@@ -115,9 +111,7 @@ class TestUIRedesignBugFixes(unittest.TestCase):
         """BUG-005: 验证码提取 API 端点存在"""
         client = self._get_client()
         resp = client.get("/api/emails/nonexistent@test.com/extract-verification")
-        self.assertIn(
-            resp.status_code, [200, 404], "验证码提取 API 应该返回 200 或 404"
-        )
+        self.assertIn(resp.status_code, [200, 404], "验证码提取 API 应该返回 200 或 404")
 
     def test_bug005_copy_verification_function_exists(self):
         """BUG-005: JS 中存在 copyVerificationInfo 函数"""

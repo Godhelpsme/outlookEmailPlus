@@ -72,9 +72,7 @@ def api_exchange_oauth_token() -> Any:
         query_params = urllib.parse.parse_qs(parsed_url.query)
         auth_code = query_params["code"][0]
     except (KeyError, IndexError):
-        return jsonify(
-            {"success": False, "error": "无法从 URL 中提取授权码，请检查 URL 是否正确"}
-        )
+        return jsonify({"success": False, "error": "无法从 URL 中提取授权码，请检查 URL 是否正确"})
 
     # 二次验证（敏感信息：refresh_token 不默认明文返回）
     ok, error_message = check_export_verify_token(verify_token)
@@ -110,15 +108,11 @@ def api_exchange_oauth_token() -> Any:
         ok, error_message = consume_export_verify_token(verify_token)
         if not ok:
             return (
-                jsonify(
-                    {"success": False, "error": error_message, "need_verify": True}
-                ),
+                jsonify({"success": False, "error": error_message, "need_verify": True}),
                 401,
             )
 
-        log_audit(
-            "oauth_exchange", "oauth", None, "换取 Refresh Token 成功（已二次验证）"
-        )
+        log_audit("oauth_exchange", "oauth", None, "换取 Refresh Token 成功（已二次验证）")
 
         return jsonify(
             {
@@ -131,10 +125,6 @@ def api_exchange_oauth_token() -> Any:
             }
         )
     else:
-        error_data = (
-            response.json()
-            if response.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
+        error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
         error_msg = error_data.get("error_description", response.text)
         return jsonify({"success": False, "error": f"获取令牌失败: {error_msg}"})

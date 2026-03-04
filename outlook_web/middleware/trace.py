@@ -60,9 +60,7 @@ def attach_trace_id_and_normalize_errors(response):
                 error_obj["trace_id"] = trace_id_value
                 mutated = True
             if not error_obj.get("status"):
-                error_obj["status"] = (
-                    response.status_code if response.status_code >= 400 else 400
-                )
+                error_obj["status"] = response.status_code if response.status_code >= 400 else 400
                 mutated = True
             if not error_obj.get("code"):
                 error_obj["code"] = "UNKNOWN_ERROR"
@@ -73,11 +71,7 @@ def attach_trace_id_and_normalize_errors(response):
 
             # 如果 error 中有 status 字段，且当前 HTTP 状态码是 200，则修正为正确的状态码
             error_status = error_obj.get("status")
-            if (
-                error_status
-                and isinstance(error_status, int)
-                and response.status_code == 200
-            ):
+            if error_status and isinstance(error_status, int) and response.status_code == 200:
                 response.status_code = error_status
                 mutated = True
 
@@ -90,9 +84,7 @@ def attach_trace_id_and_normalize_errors(response):
         # legacy：error 为字符串
         if isinstance(data.get("error"), str):
             legacy_message = data.get("error") or "请求失败"
-            status_for_payload = (
-                response.status_code if response.status_code >= 400 else 400
-            )
+            status_for_payload = response.status_code if response.status_code >= 400 else 400
             error_payload = build_error_payload(
                 code="LEGACY_ERROR",
                 message=legacy_message,

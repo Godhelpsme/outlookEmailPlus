@@ -60,9 +60,7 @@ def api_add_tag() -> Any:
             str(tag_id),
             json.dumps({"name": name, "color": color}, ensure_ascii=False),
         )
-        return jsonify(
-            {"success": True, "tag": {"id": tag_id, "name": name, "color": color}}
-        )
+        return jsonify({"success": True, "tag": {"id": tag_id, "name": name, "color": color}})
     else:
         return jsonify({"success": False, "error": "标签名称已存在"})
 

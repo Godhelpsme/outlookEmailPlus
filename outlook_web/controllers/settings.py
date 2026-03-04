@@ -25,11 +25,7 @@ def api_get_settings() -> Any:
         safe_value = str(value)
         if len(safe_value) <= head + tail:
             return "*" * len(safe_value)
-        return (
-            safe_value[:head]
-            + ("*" * (len(safe_value) - head - tail))
-            + safe_value[-tail:]
-        )
+        return safe_value[:head] + ("*" * (len(safe_value) - head - tail)) + safe_value[-tail:]
 
     # 仅返回前端需要的设置项（避免把敏感字段/内部状态直接返回）
     safe_settings = {
@@ -37,12 +33,9 @@ def api_get_settings() -> Any:
         "refresh_delay_seconds": all_settings.get("refresh_delay_seconds", "5"),
         "refresh_cron": all_settings.get("refresh_cron", "0 2 * * *"),
         "use_cron_schedule": all_settings.get("use_cron_schedule", "false"),
-        "enable_scheduled_refresh": all_settings.get(
-            "enable_scheduled_refresh", "true"
-        ),
+        "enable_scheduled_refresh": all_settings.get("enable_scheduled_refresh", "true"),
         # 轮询配置
-        "enable_auto_polling": all_settings.get("enable_auto_polling", "false")
-        == "true",
+        "enable_auto_polling": all_settings.get("enable_auto_polling", "false") == "true",
         "polling_interval": int(all_settings.get("polling_interval", "10")),
         "polling_count": int(all_settings.get("polling_count", "5")),
     }
@@ -52,9 +45,7 @@ def api_get_settings() -> Any:
     gptmail_api_key_value = all_settings.get("gptmail_api_key") or ""
     safe_settings["login_password_set"] = bool(login_password_value)
     safe_settings["gptmail_api_key_set"] = bool(gptmail_api_key_value)
-    safe_settings["gptmail_api_key_masked"] = (
-        mask_secret_value(gptmail_api_key_value) if gptmail_api_key_value else ""
-    )
+    safe_settings["gptmail_api_key_masked"] = mask_secret_value(gptmail_api_key_value) if gptmail_api_key_value else ""
 
     return jsonify({"success": True, "settings": safe_settings})
 
@@ -208,9 +199,7 @@ def api_update_settings() -> Any:
             try:
                 scheduler = scheduler_service.get_scheduler_instance()
                 if scheduler:
-                    scheduler_service.configure_scheduler_jobs(
-                        scheduler, current_app, graph_service.test_refresh_token
-                    )
+                    scheduler_service.configure_scheduler_jobs(scheduler, current_app, graph_service.test_refresh_token)
                     scheduler_reloaded = True
                 else:
                     scheduler_reloaded = False
@@ -279,6 +268,4 @@ def api_validate_cron() -> Any:
             }
         )
     except Exception as e:
-        return jsonify(
-            {"success": False, "valid": False, "error": f"Cron 表达式无效: {str(e)}"}
-        )
+        return jsonify({"success": False, "valid": False, "error": f"Cron 表达式无效: {str(e)}"})

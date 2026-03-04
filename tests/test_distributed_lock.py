@@ -17,15 +17,11 @@ class DistributedLockTests(unittest.TestCase):
             owner_a = "a_" + uuid.uuid4().hex
             owner_b = "b_" + uuid.uuid4().hex
 
-            ok, info = self.module.acquire_distributed_lock(
-                conn, lock_name, owner_a, ttl_seconds=60
-            )
+            ok, info = self.module.acquire_distributed_lock(conn, lock_name, owner_a, ttl_seconds=60)
             self.assertTrue(ok)
             self.assertIsNone(info)
 
-            ok2, info2 = self.module.acquire_distributed_lock(
-                conn, lock_name, owner_b, ttl_seconds=60
-            )
+            ok2, info2 = self.module.acquire_distributed_lock(conn, lock_name, owner_b, ttl_seconds=60)
             self.assertFalse(ok2)
             self.assertIsInstance(info2, dict)
             self.assertEqual(info2.get("owner_id"), owner_a)
@@ -33,9 +29,7 @@ class DistributedLockTests(unittest.TestCase):
             released = self.module.release_distributed_lock(conn, lock_name, owner_a)
             self.assertTrue(released)
 
-            ok3, info3 = self.module.acquire_distributed_lock(
-                conn, lock_name, owner_b, ttl_seconds=60
-            )
+            ok3, info3 = self.module.acquire_distributed_lock(conn, lock_name, owner_b, ttl_seconds=60)
             self.assertTrue(ok3)
             self.assertIsNone(info3)
         finally:
@@ -48,15 +42,11 @@ class DistributedLockTests(unittest.TestCase):
             owner_a = "a_" + uuid.uuid4().hex
             owner_b = "b_" + uuid.uuid4().hex
 
-            ok, _ = self.module.acquire_distributed_lock(
-                conn, lock_name, owner_a, ttl_seconds=1
-            )
+            ok, _ = self.module.acquire_distributed_lock(conn, lock_name, owner_a, ttl_seconds=1)
             self.assertTrue(ok)
             time.sleep(1.2)
 
-            ok2, info2 = self.module.acquire_distributed_lock(
-                conn, lock_name, owner_b, ttl_seconds=60
-            )
+            ok2, info2 = self.module.acquire_distributed_lock(conn, lock_name, owner_b, ttl_seconds=60)
             self.assertTrue(ok2)
             self.assertIsInstance(info2, dict)
             self.assertEqual(info2.get("previous_owner_id"), owner_a)

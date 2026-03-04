@@ -129,9 +129,7 @@ def init_db(database_path: Optional[str] = None):
             (DB_SCHEMA_VERSION_KEY,),
         ).fetchone()
         try:
-            current_version = (
-                int(row["value"]) if row and row["value"] is not None else 0
-            )
+            current_version = int(row["value"]) if row and row["value"] is not None else 0
         except Exception:
             current_version = 0
 
@@ -141,9 +139,7 @@ def init_db(database_path: Optional[str] = None):
             if db_existed:
                 try:
                     print("=" * 60)
-                    print(
-                        f"[升级提示] 检测到数据库需要升级：v{current_version} -> v{DB_SCHEMA_VERSION}"
-                    )
+                    print(f"[升级提示] 检测到数据库需要升级：v{current_version} -> v{DB_SCHEMA_VERSION}")
                     print(f"[升级提示] 强烈建议先备份数据库文件：{path}")
                     print(f'[升级提示] 示例：cp "{path}" "{path}.backup"')
                     print(f"[升级提示] trace_id={migration_trace_id}")
@@ -391,27 +387,19 @@ def init_db(database_path: Optional[str] = None):
         if "remark" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN remark TEXT")
         if "status" not in columns:
-            cursor.execute(
-                "ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'"
-            )
+            cursor.execute("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'")
         if "updated_at" not in columns:
-            cursor.execute(
-                "ALTER TABLE accounts ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-            )
+            cursor.execute("ALTER TABLE accounts ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         if "last_refresh_at" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN last_refresh_at TIMESTAMP")
         if "account_type" not in columns:
-            cursor.execute(
-                "ALTER TABLE accounts ADD COLUMN account_type TEXT DEFAULT 'outlook'"
-            )
+            cursor.execute("ALTER TABLE accounts ADD COLUMN account_type TEXT DEFAULT 'outlook'")
         if "provider" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN provider TEXT DEFAULT 'outlook'")
         if "imap_host" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_host TEXT")
         if "imap_port" not in columns:
-            cursor.execute(
-                "ALTER TABLE accounts ADD COLUMN imap_port INTEGER DEFAULT 993"
-            )
+            cursor.execute("ALTER TABLE accounts ADD COLUMN imap_port INTEGER DEFAULT 993")
         if "imap_password" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_password TEXT")
 

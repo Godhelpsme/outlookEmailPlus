@@ -18,9 +18,7 @@ def build_proxies(proxy_url: str) -> Optional[Dict[str, str]]:
     return {"http": proxy_url, "https": proxy_url}
 
 
-def get_access_token_graph_result(
-    client_id: str, refresh_token: str, proxy_url: str = None
-) -> Dict[str, Any]:
+def get_access_token_graph_result(client_id: str, refresh_token: str, proxy_url: str = None) -> Dict[str, Any]:
     """获取 Graph API access_token（包含错误详情）"""
     try:
         proxies = build_proxies(proxy_url)
@@ -77,9 +75,7 @@ def get_access_token_graph_result(
         }
 
 
-def get_access_token_graph(
-    client_id: str, refresh_token: str, proxy_url: str = None
-) -> Optional[str]:
+def get_access_token_graph(client_id: str, refresh_token: str, proxy_url: str = None) -> Optional[str]:
     """获取 Graph API access_token"""
     result = get_access_token_graph_result(client_id, refresh_token, proxy_url)
     if result.get("success"):
@@ -124,9 +120,7 @@ def get_emails_graph(
         }
 
         proxies = build_proxies(proxy_url)
-        res = requests.get(
-            url, headers=headers, params=params, timeout=30, proxies=proxies
-        )
+        res = requests.get(url, headers=headers, params=params, timeout=30, proxies=proxies)
 
         if res.status_code != 200:
             details = get_response_details(res)
@@ -177,9 +171,7 @@ def get_email_detail_graph(
         }
 
         proxies = build_proxies(proxy_url)
-        res = requests.get(
-            url, headers=headers, params=params, timeout=30, proxies=proxies
-        )
+        res = requests.get(url, headers=headers, params=params, timeout=30, proxies=proxies)
 
         if res.status_code != 200:
             return None
@@ -189,9 +181,7 @@ def get_email_detail_graph(
         return None
 
 
-def test_refresh_token(
-    client_id: str, refresh_token: str, proxy_url: str = None
-) -> tuple[bool, str | None]:
+def test_refresh_token(client_id: str, refresh_token: str, proxy_url: str = None) -> tuple[bool, str | None]:
     """测试 refresh token 是否有效，返回 (是否成功, 错误信息)"""
     try:
         proxies = build_proxies(proxy_url)
@@ -211,9 +201,7 @@ def test_refresh_token(
             return True, None
 
         error_data = res.json()
-        error_msg = error_data.get(
-            "error_description", error_data.get("error", "未知错误")
-        )
+        error_msg = error_data.get("error_description", error_data.get("error", "未知错误"))
         return False, error_msg
     except Exception as e:
         return False, f"请求异常: {str(e)}"
@@ -259,9 +247,7 @@ def delete_emails_graph(
 
         batch_requests = []
         for idx, msg_id in enumerate(batch):
-            batch_requests.append(
-                {"id": str(idx), "method": "DELETE", "url": f"/me/messages/{msg_id}"}
-            )
+            batch_requests.append({"id": str(idx), "method": "DELETE", "url": f"/me/messages/{msg_id}"})
 
         try:
             proxies = build_proxies(proxy_url)
@@ -281,9 +267,7 @@ def delete_emails_graph(
                     else:
                         failed_count += 1
                         try:
-                            errors.append(
-                                f"Msg ID: {batch[int(res['id'])]}, Status: {res.get('status')}"
-                            )
+                            errors.append(f"Msg ID: {batch[int(res['id'])]}, Status: {res.get('status')}")
                         except Exception:
                             errors.append(f"Status: {res.get('status')}")
             else:

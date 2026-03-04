@@ -243,9 +243,7 @@ class TestVerificationExtractor(unittest.TestCase):
 
         测试目的：验证 HTML 转纯文本功能正确
         """
-        email = {
-            "body_html": "<html><body><p>Your code is <strong>777666</strong></p></body></html>"
-        }
+        email = {"body_html": "<html><body><p>Your code is <strong>777666</strong></p></body></html>"}
 
         text = extract_email_text(email)
         self.assertIn("777666", text)

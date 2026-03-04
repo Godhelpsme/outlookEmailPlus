@@ -63,14 +63,9 @@ def api_system_health() -> Any:
             except Exception:
                 heartbeat_age_seconds = None
 
-        scheduler_enabled = (
-            settings_repo.get_setting("enable_scheduled_refresh", "true").lower()
-            == "true"
-        )
+        scheduler_enabled = settings_repo.get_setting("enable_scheduled_refresh", "true").lower() == "true"
         scheduler_autostart = config.get_scheduler_autostart_default()
-        scheduler_healthy = (heartbeat_age_seconds is not None) and (
-            heartbeat_age_seconds <= 120
-        )
+        scheduler_healthy = (heartbeat_age_seconds is not None) and (heartbeat_age_seconds <= 120)
 
         # 刷新锁/运行中
         lock_row = conn.execute(
@@ -81,9 +76,7 @@ def api_system_health() -> Any:
         """,
             (REFRESH_LOCK_NAME,),
         ).fetchone()
-        locked = bool(
-            lock_row and lock_row["expires_at"] and lock_row["expires_at"] > time.time()
-        )
+        locked = bool(lock_row and lock_row["expires_at"] and lock_row["expires_at"] > time.time())
 
         running_run = conn.execute(
             """
@@ -177,9 +170,7 @@ def api_system_diagnostics() -> Any:
             (DB_SCHEMA_VERSION_KEY,),
         ).fetchone()
         try:
-            schema_version = (
-                int(schema_version_row["value"]) if schema_version_row else 0
-            )
+            schema_version = int(schema_version_row["value"]) if schema_version_row else 0
         except Exception:
             schema_version = 0
 
@@ -231,9 +222,7 @@ def api_system_upgrade_status() -> Any:
             (DB_SCHEMA_VERSION_KEY,),
         ).fetchone()
         try:
-            schema_version = (
-                int(row["value"]) if row and row["value"] is not None else 0
-            )
+            schema_version = int(row["value"]) if row and row["value"] is not None else 0
         except Exception:
             schema_version = 0
 
@@ -274,12 +263,8 @@ def api_system_upgrade_status() -> Any:
                     "schema_version": schema_version,
                     "target_version": DB_SCHEMA_VERSION,
                     "up_to_date": schema_version >= DB_SCHEMA_VERSION,
-                    "last_upgrade_trace_id": (
-                        last_trace_row["value"] if last_trace_row else ""
-                    ),
-                    "last_upgrade_error": (
-                        last_error_row["value"] if last_error_row else ""
-                    ),
+                    "last_upgrade_trace_id": (last_trace_row["value"] if last_trace_row else ""),
+                    "last_upgrade_error": (last_error_row["value"] if last_error_row else ""),
                     "last_migration": last_migration,
                     "backup_hint": backup_hint,
                 },

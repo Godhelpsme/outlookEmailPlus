@@ -36,9 +36,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
 
     def test_gptmail_request_timeout(self):
         """测试请求超时的情况"""
-        with patch(
-            "outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"
-        ):
+        with patch("outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"):
             with patch("requests.get", side_effect=requests.exceptions.Timeout()):
                 result = gptmail.gptmail_request("GET", "/api/test")
 
@@ -48,9 +46,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
 
     def test_gptmail_request_connection_error(self):
         """测试网络连接失败的情况"""
-        with patch(
-            "outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"
-        ):
+        with patch("outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"):
             with patch(
                 "requests.get",
                 side_effect=requests.exceptions.ConnectionError("Connection refused"),
@@ -66,9 +62,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 500
 
-        with patch(
-            "outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"
-        ):
+        with patch("outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"):
             with patch("requests.get", return_value=mock_response):
                 result = gptmail.gptmail_request("GET", "/api/test")
 
@@ -81,9 +75,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 429
 
-        with patch(
-            "outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"
-        ):
+        with patch("outlook_web.services.gptmail.get_gptmail_api_key", return_value="test_key"):
             with patch("requests.get", return_value=mock_response):
                 result = gptmail.gptmail_request("GET", "/api/test")
 
@@ -95,9 +87,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
         """测试成功生成临时邮箱"""
         mock_result = {"success": True, "data": {"email": "test@example.com"}}
 
-        with patch(
-            "outlook_web.services.gptmail.gptmail_request", return_value=mock_result
-        ):
+        with patch("outlook_web.services.gptmail.gptmail_request", return_value=mock_result):
             email, error = gptmail.generate_temp_email()
 
             self.assertEqual(email, "test@example.com")
@@ -112,9 +102,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
             "details": "请在系统设置中配置 GPTMail API Key",
         }
 
-        with patch(
-            "outlook_web.services.gptmail.gptmail_request", return_value=mock_result
-        ):
+        with patch("outlook_web.services.gptmail.gptmail_request", return_value=mock_result):
             email, error = gptmail.generate_temp_email()
 
             self.assertIsNone(email)
@@ -130,9 +118,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
             "details": "请求超过 30 秒未响应，请检查网络连接或稍后重试",
         }
 
-        with patch(
-            "outlook_web.services.gptmail.gptmail_request", return_value=mock_result
-        ):
+        with patch("outlook_web.services.gptmail.gptmail_request", return_value=mock_result):
             email, error = gptmail.generate_temp_email()
 
             self.assertIsNone(email)
@@ -143,9 +129,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
         """测试 API 返回数据缺少 email 字段"""
         mock_result = {"success": True, "data": {}}  # 缺少 email 字段
 
-        with patch(
-            "outlook_web.services.gptmail.gptmail_request", return_value=mock_result
-        ):
+        with patch("outlook_web.services.gptmail.gptmail_request", return_value=mock_result):
             email, error = gptmail.generate_temp_email()
 
             self.assertIsNone(email)
@@ -156,12 +140,8 @@ class TestGPTMailErrorHandling(unittest.TestCase):
         """测试使用 prefix 和 domain 生成临时邮箱"""
         mock_result = {"success": True, "data": {"email": "custom@example.com"}}
 
-        with patch(
-            "outlook_web.services.gptmail.gptmail_request", return_value=mock_result
-        ) as mock_request:
-            email, error = gptmail.generate_temp_email(
-                prefix="custom", domain="example.com"
-            )
+        with patch("outlook_web.services.gptmail.gptmail_request", return_value=mock_result) as mock_request:
+            email, error = gptmail.generate_temp_email(prefix="custom", domain="example.com")
 
             self.assertEqual(email, "custom@example.com")
             self.assertIsNone(error)
@@ -170,9 +150,7 @@ class TestGPTMailErrorHandling(unittest.TestCase):
             mock_request.assert_called_once()
             call_args = mock_request.call_args
             self.assertEqual(call_args[0][0], "POST")
-            self.assertEqual(
-                call_args[1]["json_data"], {"prefix": "custom", "domain": "example.com"}
-            )
+            self.assertEqual(call_args[1]["json_data"], {"prefix": "custom", "domain": "example.com"})
 
 
 if __name__ == "__main__":

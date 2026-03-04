@@ -105,9 +105,7 @@ def get_imap_folder_candidates(provider: str, folder: str) -> List[str]:
     folder_key = (folder or "").strip().lower() or "inbox"
 
     folder_map = PROVIDER_FOLDER_MAP.get(provider_key, PROVIDER_FOLDER_MAP["_default"])
-    return folder_map.get(
-        folder_key, PROVIDER_FOLDER_MAP["_default"].get(folder_key, ["INBOX"])
-    )
+    return folder_map.get(folder_key, PROVIDER_FOLDER_MAP["_default"].get(folder_key, ["INBOX"]))
 
 
 def get_provider_list() -> List[Dict[str, Any]]:

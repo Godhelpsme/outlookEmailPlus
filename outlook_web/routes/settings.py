@@ -13,9 +13,7 @@ def create_blueprint() -> Blueprint:
         view_func=settings_controller.api_validate_cron,
         methods=["POST"],
     )
-    bp.add_url_rule(
-        "/api/settings", view_func=settings_controller.api_get_settings, methods=["GET"]
-    )
+    bp.add_url_rule("/api/settings", view_func=settings_controller.api_get_settings, methods=["GET"])
     bp.add_url_rule(
         "/api/settings",
         view_func=settings_controller.api_update_settings,

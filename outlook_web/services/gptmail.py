@@ -123,9 +123,7 @@ def gptmail_request(
         }
 
 
-def generate_temp_email(
-    prefix: str = None, domain: str = None
-) -> Tuple[Optional[str], Optional[str]]:
+def generate_temp_email(prefix: str = None, domain: str = None) -> Tuple[Optional[str], Optional[str]]:
     """
     生成临时邮箱地址
 
@@ -192,7 +190,5 @@ def delete_temp_email_from_api(message_id: str) -> bool:
 
 def clear_temp_emails_from_api(email_addr: str) -> bool:
     """清空 GPTMail 邮箱的所有邮件"""
-    result = gptmail_request(
-        "DELETE", "/api/emails/clear", params={"email": email_addr}
-    )
+    result = gptmail_request("DELETE", "/api/emails/clear", params={"email": email_addr})
     return bool(result and result.get("success", False))

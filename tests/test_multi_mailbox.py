@@ -29,9 +29,7 @@ class MultiMailboxSupportTests(unittest.TestCase):
     def _default_group_id(self) -> int:
         conn = self.module.create_sqlite_connection()
         try:
-            row = conn.execute(
-                "SELECT id FROM groups WHERE name = '默认分组' LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT id FROM groups WHERE name = '默认分组' LIMIT 1").fetchone()
             return int(row["id"]) if row else 1
         finally:
             conn.close()
@@ -184,9 +182,7 @@ class MultiMailboxSupportTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json(), fake_result)
 
-        delete_resp = client.post(
-            "/api/emails/delete", json={"email": email_addr, "ids": ["1"]}
-        )
+        delete_resp = client.post("/api/emails/delete", json={"email": email_addr, "ids": ["1"]})
         self.assertEqual(delete_resp.status_code, 400)
         delete_data = delete_resp.get_json()
         self.assertEqual(delete_data.get("success"), False)
@@ -351,5 +347,3 @@ class MultiMailboxSupportTests(unittest.TestCase):
         self.assertIn(outlook_email, content)
         self.assertIn(imap_email, content)
         self.assertIn("----qq", content)  # IMAP 行格式：email----imap_password----provider
-
-

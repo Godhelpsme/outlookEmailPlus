@@ -87,11 +87,7 @@ def load_accounts(group_id: int = None) -> List[Dict]:
         except Exception:
             account_id_value = None
 
-        account["tags"] = (
-            tags_by_account.get(account_id_value, [])
-            if account_id_value is not None
-            else []
-        )
+        account["tags"] = tags_by_account.get(account_id_value, []) if account_id_value is not None else []
         accounts.append(account)
     return accounts
 
@@ -190,12 +186,8 @@ def add_account(
                 return False
 
         encrypted_password = encrypt_data(password) if password else password
-        encrypted_refresh_token = (
-            encrypt_data(refresh_token) if refresh_token else refresh_token
-        )
-        encrypted_imap_password = (
-            encrypt_data(imap_password) if imap_password else imap_password
-        )
+        encrypted_refresh_token = encrypt_data(refresh_token) if refresh_token else refresh_token
+        encrypted_imap_password = encrypt_data(imap_password) if imap_password else imap_password
 
         db.execute(
             """
@@ -288,11 +280,7 @@ def update_account(
             db.commit()
             return True
 
-        new_client_id = (
-            client_id.strip()
-            if isinstance(client_id, str) and client_id.strip()
-            else existing["client_id"]
-        )
+        new_client_id = client_id.strip() if isinstance(client_id, str) and client_id.strip() else existing["client_id"]
 
         encrypted_password = existing["password"]
         if isinstance(password, str) and password.strip():

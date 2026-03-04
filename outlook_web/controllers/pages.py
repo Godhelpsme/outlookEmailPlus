@@ -83,9 +83,7 @@ def login() -> Any:
             from flask import current_app
 
             try:
-                current_app.logger.exception(
-                    "Login error trace_id=%s", trace_id_value or "unknown"
-                )
+                current_app.logger.exception("Login error trace_id=%s", trace_id_value or "unknown")
             except Exception:
                 pass
             error_payload = build_error_payload(

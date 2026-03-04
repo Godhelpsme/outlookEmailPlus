@@ -6,9 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from outlook_web.errors import build_error_payload
 
 
-def summarize_fallback_failures(
-    method_errors: Dict[str, Any], labels: Dict[str, str]
-) -> str:
+def summarize_fallback_failures(method_errors: Dict[str, Any], labels: Dict[str, str]) -> str:
     """将多方式回退的失败原因聚合成“中文可理解”的摘要文本（用于 error.details 展示）。"""
     lines: List[str] = []
 
@@ -71,10 +69,7 @@ def delete_emails_with_fallback(
     graph_error = graph_res.get("error")
     graph_errors_list = graph_res.get("errors") or []
     is_proxy_error = (
-        (
-            isinstance(graph_error, dict)
-            and graph_error.get("type") in ("ProxyError", "ConnectionError")
-        )
+        (isinstance(graph_error, dict) and graph_error.get("type") in ("ProxyError", "ConnectionError"))
         or (isinstance(graph_error, str) and "ProxyError" in graph_error)
         or any("ProxyError" in str(x) for x in graph_errors_list[:5])
     )
@@ -85,16 +80,12 @@ def delete_emails_with_fallback(
         "graph": graph_error or graph_errors_list or "Graph API 删除失败",
     }
 
-    imap_res = delete_emails_imap(
-        email_addr, client_id, refresh_token, message_ids, imap_server_new
-    )
+    imap_res = delete_emails_imap(email_addr, client_id, refresh_token, message_ids, imap_server_new)
     if imap_res.get("success"):
         return imap_res, "imap_new"
     method_errors["imap_new"] = imap_res.get("error") or imap_res
 
-    imap_old_res = delete_emails_imap(
-        email_addr, client_id, refresh_token, message_ids, imap_server_old
-    )
+    imap_old_res = delete_emails_imap(email_addr, client_id, refresh_token, message_ids, imap_server_old)
     if imap_old_res.get("success"):
         return imap_old_res, "imap_old"
     method_errors["imap_old"] = imap_old_res.get("error") or imap_old_res
