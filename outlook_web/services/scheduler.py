@@ -60,6 +60,40 @@ def scheduler_heartbeat_task():
         pass
 
 
+def _get_telegram_interval(app) -> int:
+    """读取 telegram_poll_interval 设置，默认 600 秒，最小 60 秒。"""
+    try:
+        with app.app_context():
+            val = settings_repo.get_setting("telegram_poll_interval", "600")
+        return max(60, int(val or "600"))
+    except Exception:
+        return 600
+
+
+def _configure_telegram_push_job(scheduler, app) -> None:
+    """注册/更新 Telegram 推送 Job。"""
+    from outlook_web.services.telegram_push import run_telegram_push_job
+
+    try:
+        scheduler.remove_job("telegram_push_job")
+    except Exception:
+        pass
+
+    interval = _get_telegram_interval(app)
+    scheduler.add_job(
+        func=run_telegram_push_job,
+        args=[app],
+        trigger="interval",
+        seconds=interval,
+        id="telegram_push_job",
+        name="Telegram 推送",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=interval,
+    )
+
+
 def configure_scheduler_jobs(scheduler, app, test_refresh_token) -> None:
     """根据当前 settings 重新配置定时刷新 Job（配置变更即时生效）"""
     try:
@@ -89,6 +123,9 @@ def configure_scheduler_jobs(scheduler, app, test_refresh_token) -> None:
         coalesce=True,
         misfire_grace_time=60,
     )
+
+    # Telegram 推送 Job
+    _configure_telegram_push_job(scheduler, app)
 
     # 刷新 Job：根据 enable_scheduled 决定是否启用
     try:

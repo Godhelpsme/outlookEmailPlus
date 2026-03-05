@@ -18,7 +18,8 @@ from outlook_web.security.crypto import (
 
 # 数据库 Schema 版本（用于升级可验证/可诊断）
 # v3：对齐 PRD-00005 / FD-00005 / TDD-00005（accounts 表新增多邮箱字段：account_type/provider/imap_host/imap_port/imap_password）
-DB_SCHEMA_VERSION = 3
+# v4：对齐 PRD-00007 / FD-00007（accounts 表新增 telegram_push_enabled/telegram_last_checked_at）
+DB_SCHEMA_VERSION = 4
 DB_SCHEMA_VERSION_KEY = "db_schema_version"
 DB_SCHEMA_LAST_UPGRADE_TRACE_ID_KEY = "db_schema_last_upgrade_trace_id"
 DB_SCHEMA_LAST_UPGRADE_ERROR_KEY = "db_schema_last_upgrade_error"
@@ -396,6 +397,10 @@ def init_db(database_path: Optional[str] = None):
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_port INTEGER DEFAULT 993")
         if "imap_password" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_password TEXT")
+        if "telegram_push_enabled" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_push_enabled INTEGER NOT NULL DEFAULT 0")
+        if "telegram_last_checked_at" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_last_checked_at TEXT DEFAULT NULL")
 
         cursor.execute("PRAGMA table_info(groups)")
         group_columns = [col[1] for col in cursor.fetchall()]

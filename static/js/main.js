@@ -987,6 +987,11 @@ ${details}
                     document.getElementById('enableAutoPolling').checked = enablePolling;
                     document.getElementById('pollingInterval').value = data.settings.polling_interval || '10';
                     document.getElementById('pollingCount').value = data.settings.polling_count || '5';
+
+                    // 加载 Telegram 推送设置
+                    document.getElementById('telegramBotToken').value = data.telegram_bot_token || '';
+                    document.getElementById('telegramChatId').value = data.telegram_chat_id || '';
+                    document.getElementById('telegramPollInterval').value = data.telegram_poll_interval || '600';
                 }
             } catch (error) {
                 showToast('加载设置失败', 'error');
@@ -1120,6 +1125,25 @@ ${details}
             settings.polling_interval = pInterval;
             settings.polling_count = pCount;
 
+            // Telegram 推送配置
+            const tgBotToken = document.getElementById('telegramBotToken').value.trim();
+            const tgChatId = document.getElementById('telegramChatId').value.trim();
+            const tgPollInterval = parseInt(document.getElementById('telegramPollInterval').value);
+
+            if (tgBotToken) {
+                settings.telegram_bot_token = tgBotToken;
+            }
+            if (tgChatId !== undefined) {
+                settings.telegram_chat_id = tgChatId;
+            }
+            if (!isNaN(tgPollInterval)) {
+                if (tgPollInterval < 60 || tgPollInterval > 3600) {
+                    showToast('Telegram 轮询间隔必须在 60-3600 秒之间', 'error');
+                    return;
+                }
+                settings.telegram_poll_interval = tgPollInterval;
+            }
+
             try {
                 const response = await fetch('/api/settings', {
                     method: 'PUT',
@@ -1137,6 +1161,24 @@ ${details}
                 }
             } catch (error) {
                 showToast('保存设置失败', 'error');
+            }
+        }
+
+        async function testTelegramPush() {
+            const btn = document.getElementById('btnTestTelegram');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 发送中…'; }
+            try {
+                const resp = await fetch('/api/settings/telegram-test', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await resp.json();
+                if (data.success) {
+                    showToast(data.message || '测试消息已发送', 'success');
+                } else {
+                    showToast(data.error || '发送失败', 'error');
+                }
+            } catch (e) {
+                showToast('请求失败：' + e.message, 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '📨 发送测试消息'; }
             }
         }
 

@@ -9,7 +9,7 @@ from flask import jsonify, request
 from outlook_web.audit import log_audit
 from outlook_web.repositories import settings as settings_repo
 from outlook_web.security.auth import login_required
-from outlook_web.security.crypto import hash_password
+from outlook_web.security.crypto import decrypt_data, encrypt_data, hash_password, is_encrypted
 
 # ==================== 设置 API ====================
 
@@ -47,7 +47,26 @@ def api_get_settings() -> Any:
     safe_settings["gptmail_api_key_set"] = bool(gptmail_api_key_value)
     safe_settings["gptmail_api_key_masked"] = mask_secret_value(gptmail_api_key_value) if gptmail_api_key_value else ""
 
-    return jsonify({"success": True, "settings": safe_settings})
+    # Telegram 推送配置
+    tg_bot_token_raw = all_settings.get("telegram_bot_token", "")
+    if tg_bot_token_raw and is_encrypted(tg_bot_token_raw):
+        try:
+            plain_token = decrypt_data(tg_bot_token_raw)
+            safe_settings["telegram_bot_token"] = "****" + plain_token[-4:] if len(plain_token) > 4 else "****"
+        except Exception:
+            safe_settings["telegram_bot_token"] = "****"
+    else:
+        safe_settings["telegram_bot_token"] = ""
+    safe_settings["telegram_chat_id"] = all_settings.get("telegram_chat_id", "")
+    safe_settings["telegram_poll_interval"] = int(all_settings.get("telegram_poll_interval", "600") or "600")
+
+    response = {"success": True, "settings": safe_settings}
+    # 同时在顶层暴露 telegram 字段（兼容前端直接访问）
+    response["telegram_bot_token"] = safe_settings.get("telegram_bot_token", "")
+    response["telegram_chat_id"] = safe_settings.get("telegram_chat_id", "")
+    response["telegram_poll_interval"] = safe_settings.get("telegram_poll_interval", 600)
+
+    return jsonify(response)
 
 
 @login_required
@@ -190,6 +209,42 @@ def api_update_settings() -> Any:
         except ValueError:
             errors.append("轮询次数必须是数字")
 
+    # Telegram 推送配置
+    if "telegram_poll_interval" in data:
+        try:
+            tg_interval = int(data["telegram_poll_interval"])
+            if tg_interval < 60 or tg_interval > 3600:
+                errors.append("Telegram 轮询间隔必须在 60-3600 秒之间")
+            elif settings_repo.set_setting("telegram_poll_interval", str(tg_interval)):
+                updated.append("Telegram 轮询间隔")
+                scheduler_reload_needed = True
+            else:
+                errors.append("更新 Telegram 轮询间隔失败")
+        except (ValueError, TypeError):
+            errors.append("Telegram 轮询间隔必须是数字")
+
+    if "telegram_bot_token" in data:
+        tg_token = str(data["telegram_bot_token"]).strip()
+        if tg_token and not tg_token.startswith("****"):
+            encrypted_token = encrypt_data(tg_token)
+            if settings_repo.set_setting("telegram_bot_token", encrypted_token):
+                updated.append("Telegram Bot Token")
+            else:
+                errors.append("更新 Telegram Bot Token 失败")
+        elif not tg_token:
+            if settings_repo.set_setting("telegram_bot_token", ""):
+                updated.append("Telegram Bot Token（已清空）")
+        else:
+            # 脱敏占位符（****xxx），跳过不覆盖
+            updated.append("Telegram Bot Token（未变更）")
+
+    if "telegram_chat_id" in data:
+        tg_chat_id = str(data["telegram_chat_id"]).strip()
+        if settings_repo.set_setting("telegram_chat_id", tg_chat_id):
+            updated.append("Telegram Chat ID")
+        else:
+            errors.append("更新 Telegram Chat ID 失败")
+
     if errors:
         return jsonify({"success": False, "error": "；".join(errors)})
 
@@ -269,3 +324,24 @@ def api_validate_cron() -> Any:
         )
     except Exception as e:
         return jsonify({"success": False, "valid": False, "error": f"Cron 表达式无效: {str(e)}"})
+
+
+@login_required
+def api_test_telegram() -> Any:
+    """发送 Telegram 测试消息，验证 bot_token + chat_id 配置是否正确"""
+    from outlook_web.services.telegram_push import _send_telegram_message
+
+    bot_token_raw = settings_repo.get_setting("telegram_bot_token", "")
+    chat_id = settings_repo.get_setting("telegram_chat_id", "")
+
+    if not bot_token_raw or not chat_id:
+        return jsonify({"success": False, "error": "请先配置 Telegram Bot Token 和 Chat ID"})
+
+    bot_token = decrypt_data(bot_token_raw) if is_encrypted(bot_token_raw) else bot_token_raw
+
+    ok = _send_telegram_message(bot_token, chat_id, "✅ Outlook Email Plus 测试消息：配置正确！")
+    if ok:
+        log_audit("telegram_test", "settings", None, "测试消息发送成功")
+        return jsonify({"success": True, "message": "测试消息已发送，请检查 Telegram"})
+    else:
+        return jsonify({"success": False, "error": "发送失败，请检查 Bot Token 和 Chat ID 是否正确"})

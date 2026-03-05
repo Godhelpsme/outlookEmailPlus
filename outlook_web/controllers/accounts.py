@@ -121,6 +121,7 @@ def api_get_accounts() -> Any:
                 "created_at": acc.get("created_at", ""),
                 "updated_at": acc.get("updated_at", ""),
                 "tags": acc.get("tags", []),
+                "telegram_push_enabled": bool(acc.get("telegram_push_enabled")),
             }
         )
     return jsonify({"success": True, "accounts": safe_accounts})
@@ -1871,3 +1872,19 @@ def api_get_refresh_stats() -> Any:
             },
         }
     )
+
+
+# ==================== Telegram 推送 API ====================
+
+
+@login_required
+def api_telegram_toggle(account_id: int) -> Any:
+    """切换账号 Telegram 推送开关"""
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled", False))
+    success = accounts_repo.toggle_telegram_push(account_id, enabled)
+    if not success:
+        return jsonify({"success": False, "message": "账号不存在"}), 404
+    action = "开启" if enabled else "关闭"
+    log_audit(f"telegram_push_{action}", "account", str(account_id))
+    return jsonify({"success": True, "enabled": enabled, "message": f"Telegram推送已{action}"})

@@ -313,6 +313,7 @@ input, textarea, select { font-family: inherit; }
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.78rem; }
 .btn-icon { padding: 0.4rem; font-size: 0.9rem; background: none; border: none; color: var(--text-muted); border-radius: var(--radius-sm); }
 .btn-icon:hover { background: var(--border-light); color: var(--text); }
+.btn-icon.tg-push-active { color: #0088cc; filter: drop-shadow(0 0 2px #0088cc66); }
 
 /* 表单 */
 .form-group { margin-bottom: 1.1rem; }

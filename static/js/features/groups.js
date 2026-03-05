@@ -271,6 +271,7 @@
                             ${isFailed ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); showRefreshError(${acc.id}, '${escapeJs(acc.last_refresh_error || '未知错误')}', '${escapeJs(acc.email)}')" style="padding:1px 6px;font-size:0.65rem;">查看错误</button>` : ''}
                         </div>
                         <div class="account-actions">
+                            <button class="btn-icon ${acc.telegram_push_enabled ? 'tg-push-active' : ''}" onclick="event.stopPropagation(); toggleTelegramPush(${acc.id}, ${!acc.telegram_push_enabled})" title="Telegram推送${acc.telegram_push_enabled ? '(已开启)' : ''}">🔔</button>
                             <button class="btn btn-sm btn-accent" onclick="event.stopPropagation(); copyVerificationInfo('${escapeJs(acc.email)}', this)" title="提取验证码" style="font-size:0.72rem;padding:2px 8px;">🔑 验证码</button>
                             <button class="btn-icon" onclick="event.stopPropagation(); copyEmail('${escapeJs(acc.email)}')" title="复制">📋</button>
                             <button class="btn-icon" onclick="event.stopPropagation(); showEditAccountModal(${acc.id})" title="编辑">✏️</button>

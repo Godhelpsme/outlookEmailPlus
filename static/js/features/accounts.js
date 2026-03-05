@@ -541,6 +541,29 @@
             }
         }
 
+        // 切换 Telegram 推送开关
+        async function toggleTelegramPush(accountId, enabled) {
+            try {
+                const response = await fetch(`/api/accounts/${accountId}/telegram-toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message || (enabled ? 'Telegram推送已开启' : 'Telegram推送已关闭'), 'success');
+                    if (currentGroupId) {
+                        delete accountsCache[currentGroupId];
+                        loadAccountsByGroup(currentGroupId, true);
+                    }
+                } else {
+                    handleApiError(data, 'Telegram推送切换失败');
+                }
+            } catch (error) {
+                showToast('操作失败', 'error');
+            }
+        }
+
         // 显示导出邮箱模态框
         async function showExportModal() {
             document.getElementById('exportModal').classList.add('show');

@@ -420,6 +420,33 @@
                             </div>
                         </div>
 
+                        <!-- Telegram 推送设置 -->
+                        <div style="border-top: 1px solid var(--border-light); margin: 1.5rem 0; padding-top: 1.5rem;">
+                            <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem; color: var(--text);">📬 Telegram 推送</h4>
+                            <div class="form-group">
+                                <label class="form-label">Bot Token <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（从 @BotFather 获取）</span></label>
+                                <input type="password" class="form-input" id="telegramBotToken" placeholder="输入 Bot Token" autocomplete="off">
+                                <div class="form-hint">格式：1234567890:AAxxxxxx（留空则禁用推送）</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Chat ID <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（接收推送的用户/群组 ID）</span></label>
+                                <input type="text" class="form-input" id="telegramChatId" placeholder="输入 Chat ID" style="max-width: 300px;">
+                                <div class="form-hint">可用 @userinfobot 获取你的 Chat ID</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">轮询间隔 <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（检查新邮件的时间间隔）</span></label>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input type="number" class="form-input" id="telegramPollInterval" min="60" max="3600" value="600" placeholder="600" style="max-width: 120px;">
+                                    <span style="font-size: 0.88rem; color: var(--text-muted); font-weight: 500;">秒</span>
+                                </div>
+                                <div class="form-hint">范围：60-3600 秒，默认 600 秒（10 分钟）</div>
+                            </div>
+                            <div class="form-group" style="margin-top: 0.5rem;">
+                                <button class="btn btn-outline" onclick="testTelegramPush()" id="btnTestTelegram" style="font-size: 0.85rem;">📨 发送测试消息</button>
+                                <div class="form-hint">验证 Bot Token 和 Chat ID 是否配置正确</div>
+                            </div>
+                        </div>
+
                         <!-- 保存按钮 -->
                         <div style="display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-light);">
                             <button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>
