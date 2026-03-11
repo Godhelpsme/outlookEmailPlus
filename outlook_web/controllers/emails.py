@@ -916,24 +916,46 @@ def api_external_wait_message() -> Any:
         args = _parse_external_common_args()
         timeout_seconds = request.args.get("timeout_seconds", "30")
         poll_interval = request.args.get("poll_interval", "5")
-        result = external_api_service.wait_for_message(
-            email_addr=args["email"],
-            timeout_seconds=int(timeout_seconds),
-            poll_interval=int(poll_interval),
-            folder=args["folder"],
-            from_contains=args["from_contains"],
-            subject_contains=args["subject_contains"],
-            since_minutes=args["since_minutes"],
-        )
+        mode = request.args.get("mode", "sync").lower()
 
-        external_api_service.audit_external_api_access(
-            action="external_api_access",
-            email_addr=args["email"] or "",
-            endpoint="/api/external/wait-message",
-            status="ok",
-            details={"matched_email_id": result.get("id"), "method": result.get("method")},
-        )
-        return jsonify(external_api_service.ok(result))
+        if mode == "async":
+            # P2 异步模式：创建探测请求，立即返回 probe_id
+            probe_result = external_api_service.create_probe(
+                email_addr=args["email"],
+                timeout_seconds=int(timeout_seconds),
+                poll_interval=int(poll_interval),
+                folder=args["folder"],
+                from_contains=args["from_contains"],
+                subject_contains=args["subject_contains"],
+                since_minutes=args["since_minutes"],
+            )
+            external_api_service.audit_external_api_access(
+                action="external_api_access",
+                email_addr=args["email"] or "",
+                endpoint="/api/external/wait-message?mode=async",
+                status="ok",
+                details={"probe_id": probe_result["probe_id"]},
+            )
+            return jsonify(external_api_service.ok(probe_result)), 202
+        else:
+            # P0 同步模式：阻塞等待（向下兼容）
+            result = external_api_service.wait_for_message(
+                email_addr=args["email"],
+                timeout_seconds=int(timeout_seconds),
+                poll_interval=int(poll_interval),
+                folder=args["folder"],
+                from_contains=args["from_contains"],
+                subject_contains=args["subject_contains"],
+                since_minutes=args["since_minutes"],
+            )
+            external_api_service.audit_external_api_access(
+                action="external_api_access",
+                email_addr=args["email"] or "",
+                endpoint="/api/external/wait-message",
+                status="ok",
+                details={"matched_email_id": result.get("id"), "method": result.get("method")},
+            )
+            return jsonify(external_api_service.ok(result))
     except external_api_service.ExternalApiError as exc:
         external_api_service.audit_external_api_access(
             action="external_api_access",
@@ -951,4 +973,17 @@ def api_external_wait_message() -> Any:
             status="error",
             details={"code": "INTERNAL_ERROR", "err": type(exc).__name__},
         )
+        return jsonify(external_api_service.fail("INTERNAL_ERROR", "服务内部错误")), 500
+
+
+@api_key_required
+@external_api_guards()
+def api_external_get_probe_status(probe_id: str) -> Any:
+    """P2: 查询异步探测状态与结果"""
+    try:
+        result = external_api_service.get_probe_status(probe_id)
+        return jsonify(external_api_service.ok(result))
+    except external_api_service.ExternalApiError as exc:
+        return _external_error_response(exc)
+    except Exception:
         return jsonify(external_api_service.fail("INTERNAL_ERROR", "服务内部错误")), 500

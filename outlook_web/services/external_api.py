@@ -551,6 +551,248 @@ def wait_for_message(
         time.sleep(poll_interval)
 
 
+# ── P2: 异步探测 (probe) ──────────────────────────────
+
+
+def _validate_probe_params(
+    email_addr: str,
+    timeout_seconds: int,
+    poll_interval: int,
+) -> None:
+    """校验探测参数，与 wait_for_message 保持一致。"""
+    if not email_addr:
+        raise InvalidParamError("email 参数不能为空")
+    try:
+        timeout_seconds = int(timeout_seconds)
+        poll_interval = int(poll_interval)
+    except Exception as exc:
+        raise InvalidParamError("timeout_seconds/poll_interval 参数无效") from exc
+    if timeout_seconds <= 0 or timeout_seconds > MAX_TIMEOUT_SECONDS:
+        raise InvalidParamError(f"timeout_seconds 必须在 1-{MAX_TIMEOUT_SECONDS} 秒之间")
+    if poll_interval <= 0 or poll_interval > timeout_seconds:
+        raise InvalidParamError("poll_interval 参数无效")
+
+
+def create_probe(
+    *,
+    email_addr: str,
+    timeout_seconds: int = 30,
+    poll_interval: int = 5,
+    folder: str = "inbox",
+    from_contains: str = "",
+    subject_contains: str = "",
+    since_minutes: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    创建一个异步探测请求，后台 worker 会定期轮询直到匹配或超时。
+    返回 probe_id 供后续查询。
+    """
+    import uuid
+
+    from outlook_web.db import get_db
+
+    _validate_probe_params(email_addr, timeout_seconds, poll_interval)
+
+    # 检查账号是否存在
+    account = accounts_repo.get_account_by_email(email_addr)
+    if not account:
+        raise AccountNotFoundError("指定邮箱账号不存在", data={"email": email_addr})
+
+    probe_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=int(timeout_seconds))
+
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO external_probe_cache
+            (id, email_addr, folder, from_contains, subject_contains,
+             since_minutes, timeout_seconds, poll_interval, status, expires_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        """,
+        (
+            probe_id,
+            email_addr,
+            folder,
+            from_contains,
+            subject_contains,
+            since_minutes,
+            int(timeout_seconds),
+            int(poll_interval),
+            expires_at.isoformat(),
+            now.isoformat(),
+            now.isoformat(),
+        ),
+    )
+    db.commit()
+
+    return {
+        "probe_id": probe_id,
+        "status": "pending",
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        "poll_url": f"/api/external/probe/{probe_id}",
+    }
+
+
+def get_probe_status(probe_id: str) -> Dict[str, Any]:
+    """查询探测状态与结果。"""
+    from outlook_web.db import get_db
+
+    if not probe_id:
+        raise InvalidParamError("probe_id 不能为空")
+
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM external_probe_cache WHERE id = ?", (probe_id,)
+    ).fetchone()
+
+    if not row:
+        raise MailNotFoundError("探测请求不存在", data={"probe_id": probe_id})
+
+    result: Dict[str, Any] = {
+        "probe_id": row["id"],
+        "email": row["email_addr"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+    }
+
+    if row["status"] == "matched" and row["result_json"]:
+        try:
+            result["message"] = json.loads(row["result_json"])
+        except (json.JSONDecodeError, TypeError):
+            result["message"] = None
+    elif row["status"] == "timeout":
+        result["error_code"] = "WAIT_TIMEOUT"
+        result["error_message"] = row["error_message"] or "等待超时，未检测到匹配邮件"
+    elif row["status"] == "error":
+        result["error_code"] = row["error_code"] or "PROBE_ERROR"
+        result["error_message"] = row["error_message"] or "探测过程中发生错误"
+
+    return result
+
+
+def poll_pending_probes(app: Any = None) -> int:
+    """
+    后台任务：遍历所有 pending 状态的探测请求，执行一轮轮询。
+    返回本轮处理的探测数量。
+    """
+    from outlook_web.db import get_db
+
+    ctx = None
+    if app is not None:
+        ctx = app.app_context()
+        ctx.push()
+
+    try:
+        db = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # 1. 将已过期的 pending 标记为 timeout
+        db.execute(
+            """
+            UPDATE external_probe_cache
+            SET status = 'timeout',
+                error_message = '等待超时，未检测到匹配邮件',
+                updated_at = ?
+            WHERE status = 'pending' AND expires_at <= ?
+            """,
+            (now, now),
+        )
+        db.commit()
+
+        # 2. 获取仍在 pending 的探测
+        rows = db.execute(
+            """
+            SELECT * FROM external_probe_cache
+            WHERE status = 'pending' AND expires_at > ?
+            ORDER BY created_at ASC
+            LIMIT 50
+            """,
+            (now,),
+        ).fetchall()
+
+        processed = 0
+        for row in rows:
+            processed += 1
+            probe_id = row["id"]
+            # 基线时间戳：探测创建时间（只匹配创建后到达的新邮件）
+            try:
+                created_str = row["created_at"] or ""
+                if created_str.endswith("Z"):
+                    created_str = created_str[:-1] + "+00:00"
+                created_dt = datetime.fromisoformat(created_str)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                baseline_ts = int(created_dt.timestamp())
+            except Exception:
+                baseline_ts = int(time.time()) - row["timeout_seconds"]
+
+            try:
+                latest = get_latest_message_for_external(
+                    email_addr=row["email_addr"],
+                    folder=row["folder"],
+                    from_contains=row["from_contains"],
+                    subject_contains=row["subject_contains"],
+                    since_minutes=row["since_minutes"],
+                )
+                msg_ts = int(latest.get("timestamp") or 0)
+                if msg_ts >= baseline_ts:
+                    db.execute(
+                        """
+                        UPDATE external_probe_cache
+                        SET status = 'matched', result_json = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (json.dumps(latest, ensure_ascii=False), now, probe_id),
+                    )
+                    db.commit()
+            except MailNotFoundError:
+                pass  # 未找到邮件，保持 pending
+            except Exception as exc:
+                db.execute(
+                    """
+                    UPDATE external_probe_cache
+                    SET status = 'error', error_code = 'PROBE_ERROR',
+                        error_message = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (str(exc)[:500], now, probe_id),
+                )
+                db.commit()
+
+        return processed
+    finally:
+        if ctx is not None:
+            ctx.pop()
+
+
+def cleanup_expired_probes(app: Any = None, max_age_minutes: int = 30) -> int:
+    """清理已完成/超时/错误的探测记录（默认清理 30 分钟前的）。"""
+    from outlook_web.db import get_db
+
+    ctx = None
+    if app is not None:
+        ctx = app.app_context()
+        ctx.push()
+
+    try:
+        db = get_db()
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+        cursor = db.execute(
+            """
+            DELETE FROM external_probe_cache
+            WHERE status IN ('matched', 'timeout', 'error') AND updated_at < ?
+            """,
+            (cutoff,),
+        )
+        db.commit()
+        return cursor.rowcount
+    finally:
+        if ctx is not None:
+            ctx.pop()
+
+
 def audit_external_api_access(
     *,
     action: str,

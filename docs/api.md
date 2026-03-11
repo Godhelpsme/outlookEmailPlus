@@ -33,7 +33,8 @@
 | Messages | `GET` | `/api/external/messages/{message_id}/raw` | 已创建 | 获取邮件 RAW 内容 |
 | Verification | `GET` | `/api/external/verification-code` | 已创建 | 提取最新验证码 |
 | Verification | `GET` | `/api/external/verification-link` | 已创建 | 提取最新验证链接 |
-| Verification | `GET` | `/api/external/wait-message` | 已创建 | 等待新邮件到达 |
+| Verification | `GET` | `/api/external/wait-message` | 已创建 | 等待新邮件到达（支持 sync/async） |
+| Verification | `GET` | `/api/external/probe/<probe_id>` | 已创建（v1.2） | 查询异步探测状态 |
 | System | `GET` | `/api/external/health` | 已创建 | 外部健康检查 |
 | System | `GET` | `/api/external/capabilities` | 已创建 | 查询开放能力 |
 | System | `GET` | `/api/external/account-status` | 已创建 | 查询邮箱账号状态 |
@@ -66,7 +67,7 @@ P0 阶段不建议再新增以下业务接口：
 |------|------|----------------------|------|
 | P1 | 公网模式、IP 白名单、限流 | 已实现（v1.1） | 安全守卫层 `external_api_guard.py` |
 | P1 | 高风险接口禁用（raw/wait-message） | 已实现（v1.1） | 设置页可动态开关 |
-| P2 | `wait-message` 解耦 | 否 | 先做后台轮询与缓存，再决定是否新增异步接口 |
+| P2 | `wait-message` 异步探测解耦 | 已实现（v1.2） | `mode=async` + `/api/external/probe/<id>` |
 | P2 | 多 API Key / 范围授权 | 否 | 优先落在设置与鉴权模型，不急于新增公开路径 |
 
 结论：
@@ -477,6 +478,9 @@ curl -H "X-API-Key: your-api-key" \
 |------|------|------|--------|------|
 | `timeout_seconds` | int | 否 | `30` | 取值范围 `1-120` |
 | `poll_interval` | int | 否 | `5` | 轮询间隔，必须大于 `0` 且不超过 `timeout_seconds` |
+| `mode` | string | 否 | `sync` | `sync` = 阻塞等待（P0），`async` = 创建探测任务（P2） |
+
+#### 同步模式（`mode=sync`，默认）
 
 行为说明：
 
@@ -484,26 +488,77 @@ curl -H "X-API-Key: your-api-key" \
 - 不会立即返回历史旧邮件
 - 当前实现为同步轮询，请求线程会被占用
 
-成功响应：
-
-- 结构与 `GET /api/external/messages/latest` 一致
+成功响应：结构与 `GET /api/external/messages/latest` 一致
 
 失败场景：
 
 - 超时未命中：`404 MAIL_NOT_FOUND`
 - `timeout_seconds` 超限：`400 INVALID_PARAM`
 
+#### 异步模式（`mode=async`，v1.2 新增）
+
+行为说明：
+
+- 立即返回 `202` + `probe_id`，不阻塞请求线程
+- 后台 worker 每 5 秒轮询一次，匹配到新邮件后写入缓存
+- 调用方通过 `GET /api/external/probe/<probe_id>` 查询结果
+
+成功响应（`202`）：
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "data": {
+    "probe_id": "abc123...",
+    "status": "pending",
+    "expires_at": "2026-03-11T15:00:00Z",
+    "poll_url": "/api/external/probe/abc123..."
+  }
+}
+```
+
 > **⚠️ 安全风险说明**
 >
-> `/api/external/wait-message` 采用同步轮询实现，请求线程在等待期间被独占。
->
-> **当前版本定位**：仅面向受控私有接入场景，不建议在公网环境直接暴露。
->
-> **风险点**：
-> - 单次请求最长占用 120 秒线程，恶意并发可耗尽服务线程池
-> - 当前无独立的并发连接限制或调用频率限流
-> - 若部署在公网，该接口应优先禁用或加入限流保护（P1 计划）
-> - P2 计划将同步轮询解耦为后台任务 + 状态查询模式
+> 同步模式下，请求线程在等待期间被独占（最长 120 秒）。
+> 推荐在高并发或公网场景使用 `mode=async` 避免线程耗尽。
+> 公网模式（P1）下可通过设置禁用此端点。
+
+### 5.4 `GET /api/external/probe/<probe_id>`（v1.2 新增）
+
+用途：查询异步探测任务的状态与结果。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `probe_id` | string (path) | 是 | 由 `wait-message?mode=async` 返回 |
+
+探测状态：
+
+| 状态 | 含义 |
+|------|------|
+| `pending` | 后台正在轮询，尚未命中 |
+| `matched` | 已命中新邮件，`message` 字段包含邮件数据 |
+| `timeout` | 等待超时，未匹配到邮件 |
+| `error` | 轮询过程中发生错误 |
+
+成功响应（`matched`）：
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "data": {
+    "probe_id": "abc123...",
+    "email": "user@outlook.com",
+    "status": "matched",
+    "created_at": "...",
+    "expires_at": "...",
+    "message": { ... }
+  }
+}
+```
+
+失败场景：`404 MAIL_NOT_FOUND`（probe_id 不存在）
 
 ## 六、System 类接口
 

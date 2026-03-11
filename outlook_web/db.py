@@ -20,7 +20,8 @@ from outlook_web.security.crypto import (
 # v3：对齐 PRD-00005 / FD-00005 / TDD-00005（accounts 表新增多邮箱字段：account_type/provider/imap_host/imap_port/imap_password）
 # v5：BUG-00011 P2 — Message-ID 去重防止重复推送
 # v6：PRD-00008 P1 — 对外 API 限流表 + 公网模式默认配置
-DB_SCHEMA_VERSION = 6
+# v7：PRD-00008 P2 — wait-message 异步探测缓存表
+DB_SCHEMA_VERSION = 7
 DB_SCHEMA_VERSION_KEY = "db_schema_version"
 DB_SCHEMA_LAST_UPGRADE_TRACE_ID_KEY = "db_schema_last_upgrade_trace_id"
 DB_SCHEMA_LAST_UPGRADE_ERROR_KEY = "db_schema_last_upgrade_error"
@@ -537,6 +538,35 @@ def init_db(database_path: Optional[str] = None):
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 (key, default),
             )
+
+        # v7: wait-message 异步探测缓存表（PRD-00008 P2）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS external_probe_cache (
+                id TEXT PRIMARY KEY,
+                email_addr TEXT NOT NULL,
+                folder TEXT NOT NULL DEFAULT 'inbox',
+                from_contains TEXT NOT NULL DEFAULT '',
+                subject_contains TEXT NOT NULL DEFAULT '',
+                since_minutes INTEGER,
+                timeout_seconds INTEGER NOT NULL DEFAULT 30,
+                poll_interval INTEGER NOT NULL DEFAULT 5,
+                status TEXT NOT NULL DEFAULT 'pending',
+                result_json TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_probe_status
+            ON external_probe_cache(status, expires_at)
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_probe_email
+            ON external_probe_cache(email_addr, status)
+            """)
 
         # 迁移现有明文数据为加密数据
         migrate_sensitive_data(conn)

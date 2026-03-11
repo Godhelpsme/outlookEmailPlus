@@ -1450,3 +1450,267 @@ class GuardSettingsApiTests(ExternalApiGuardBaseTest):
             self.assertEqual(s["external_api_rate_limit_per_minute"], 30)
             self.assertTrue(s["external_api_disable_raw_content"])
             self.assertTrue(s["external_api_disable_wait_message"])
+
+
+
+# ======================================================================
+# P2 异步探测 (probe) 测试
+# ======================================================================
+
+
+class ExternalApiProbeBaseTest(ExternalApiBaseTest):
+    """P2 探测测试基类。"""
+
+    def setUp(self):
+        super().setUp()
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            from outlook_web.repositories import settings as settings_repo
+            db = get_db()
+            db.execute("DELETE FROM external_probe_cache")
+            db.commit()
+            # 确保公网模式关闭，避免 P1 守卫干扰
+            settings_repo.set_setting("external_api_public_mode", "false")
+            settings_repo.set_setting("external_api_disable_wait_message", "false")
+            settings_repo.set_setting("external_api_disable_raw_content", "false")
+
+
+class ProbeCreateTests(ExternalApiProbeBaseTest):
+    """TC-PROBE-01~04: 创建异步探测。"""
+
+    def test_create_probe_async(self):
+        """TC-PROBE-01: mode=async 创建探测返回 202 + probe_id"""
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get(
+            f"/api/external/wait-message?email={email_addr}&mode=async&timeout_seconds=30",
+            headers=self._auth_headers(),
+        )
+        self.assertEqual(resp.status_code, 202)
+        data = resp.get_json()
+        self.assertTrue(data["success"])
+        self.assertIn("probe_id", data["data"])
+        self.assertEqual(data["data"]["status"], "pending")
+        self.assertIn("poll_url", data["data"])
+
+    def test_create_probe_invalid_email(self):
+        """TC-PROBE-02: 不存在的邮箱 → 404"""
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get(
+            "/api/external/wait-message?email=nonexist@test.com&mode=async",
+            headers=self._auth_headers(),
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_create_probe_invalid_timeout(self):
+        """TC-PROBE-03: 无效 timeout → 400"""
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get(
+            f"/api/external/wait-message?email={email_addr}&mode=async&timeout_seconds=999",
+            headers=self._auth_headers(),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_sync_mode_still_works(self):
+        """TC-PROBE-04: mode=sync（默认）保持阻塞等待行为"""
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        # sync 模式超时会返回 404 MAIL_NOT_FOUND
+        resp = client.get(
+            f"/api/external/wait-message?email={email_addr}&timeout_seconds=1&poll_interval=1",
+            headers=self._auth_headers(),
+        )
+        self.assertIn(resp.status_code, [404, 502])  # MAIL_NOT_FOUND or upstream error
+
+
+class ProbeStatusTests(ExternalApiProbeBaseTest):
+    """TC-PROBE-05~08: 查询探测状态。"""
+
+    def test_get_probe_status_pending(self):
+        """TC-PROBE-05: 新建探测状态为 pending"""
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        # 创建
+        resp = client.get(
+            f"/api/external/wait-message?email={email_addr}&mode=async&timeout_seconds=60",
+            headers=self._auth_headers(),
+        )
+        probe_id = resp.get_json()["data"]["probe_id"]
+        # 查询
+        resp2 = client.get(
+            f"/api/external/probe/{probe_id}",
+            headers=self._auth_headers(),
+        )
+        self.assertEqual(resp2.status_code, 200)
+        data = resp2.get_json()["data"]
+        self.assertEqual(data["status"], "pending")
+        self.assertEqual(data["probe_id"], probe_id)
+
+    def test_get_probe_status_not_found(self):
+        """TC-PROBE-06: 不存在的 probe_id → 404"""
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get(
+            "/api/external/probe/nonexist123",
+            headers=self._auth_headers(),
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_probe_requires_auth(self):
+        """TC-PROBE-07: 查询探测需要 API Key"""
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get("/api/external/probe/some-id")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_probe_status_contains_email(self):
+        """TC-PROBE-08: 探测状态包含邮箱地址"""
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+        resp = client.get(
+            f"/api/external/wait-message?email={email_addr}&mode=async&timeout_seconds=60",
+            headers=self._auth_headers(),
+        )
+        probe_id = resp.get_json()["data"]["probe_id"]
+        resp2 = client.get(f"/api/external/probe/{probe_id}", headers=self._auth_headers())
+        data = resp2.get_json()["data"]
+        self.assertEqual(data["email"], email_addr)
+
+
+class ProbePollTests(ExternalApiProbeBaseTest):
+    """TC-PROBE-09~12: 后台探测轮询逻辑。"""
+
+    def test_poll_marks_expired_as_timeout(self):
+        """TC-PROBE-09: 过期的 pending 探测被标记为 timeout"""
+        from datetime import datetime, timedelta, timezone
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            past = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+            db.execute(
+                """INSERT INTO external_probe_cache
+                   (id, email_addr, status, timeout_seconds, poll_interval, expires_at, created_at, updated_at)
+                   VALUES (?, ?, 'pending', 30, 5, ?, ?, ?)""",
+                ("expired-probe-1", email_addr, past, past, past),
+            )
+            db.commit()
+
+        with self.app.app_context():
+            from outlook_web.services.external_api import poll_pending_probes
+            poll_pending_probes()
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            row = db.execute("SELECT status FROM external_probe_cache WHERE id = ?", ("expired-probe-1",)).fetchone()
+            self.assertEqual(row["status"], "timeout")
+
+    def test_poll_matches_new_email(self):
+        """TC-PROBE-10: 后台轮询命中新邮件时标记为 matched"""
+        from unittest.mock import patch
+        from datetime import datetime, timedelta, timezone
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+
+        now = datetime.now(timezone.utc)
+        future = (now + timedelta(seconds=120)).isoformat()
+        now_iso = now.isoformat()
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            db.execute(
+                """INSERT INTO external_probe_cache
+                   (id, email_addr, status, timeout_seconds, poll_interval, expires_at, created_at, updated_at)
+                   VALUES (?, ?, 'pending', 60, 5, ?, ?, ?)""",
+                ("match-probe-1", email_addr, future, now_iso, now_iso),
+            )
+            db.commit()
+
+        mock_msg = {
+            "id": "msg-new",
+            "subject": "Code 123456",
+            "timestamp": int(now.timestamp()) + 1,
+            "method": "graph",
+        }
+        with self.app.app_context():
+            with patch("outlook_web.services.external_api.get_latest_message_for_external", return_value=mock_msg):
+                from outlook_web.services.external_api import poll_pending_probes
+                poll_pending_probes()
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            row = db.execute("SELECT * FROM external_probe_cache WHERE id = ?", ("match-probe-1",)).fetchone()
+            self.assertEqual(row["status"], "matched")
+            self.assertIn("msg-new", row["result_json"])
+
+    def test_cleanup_old_probes(self):
+        """TC-PROBE-11: cleanup 清理过期已完成探测"""
+        from datetime import datetime, timedelta, timezone
+        email_addr = self._insert_outlook_account()
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            old = (datetime.now(timezone.utc) - timedelta(minutes=60)).isoformat()
+            db.execute(
+                """INSERT INTO external_probe_cache
+                   (id, email_addr, status, timeout_seconds, poll_interval, expires_at, created_at, updated_at)
+                   VALUES (?, ?, 'timeout', 30, 5, ?, ?, ?)""",
+                ("old-probe-1", email_addr, old, old, old),
+            )
+            db.commit()
+
+        with self.app.app_context():
+            from outlook_web.services.external_api import cleanup_expired_probes
+            deleted = cleanup_expired_probes(max_age_minutes=30)
+            self.assertGreaterEqual(deleted, 1)
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            row = db.execute("SELECT * FROM external_probe_cache WHERE id = ?", ("old-probe-1",)).fetchone()
+            self.assertIsNone(row)
+
+    def test_poll_handles_upstream_error(self):
+        """TC-PROBE-12: 轮询中上游错误标记为 error"""
+        from unittest.mock import patch
+        from datetime import datetime, timedelta, timezone
+        email_addr = self._insert_outlook_account()
+
+        now = datetime.now(timezone.utc)
+        future = (now + timedelta(seconds=120)).isoformat()
+        now_iso = now.isoformat()
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            db.execute(
+                """INSERT INTO external_probe_cache
+                   (id, email_addr, status, timeout_seconds, poll_interval, expires_at, created_at, updated_at)
+                   VALUES (?, ?, 'pending', 60, 5, ?, ?, ?)""",
+                ("error-probe-1", email_addr, future, now_iso, now_iso),
+            )
+            db.commit()
+
+        with self.app.app_context():
+            with patch("outlook_web.services.external_api.get_latest_message_for_external",
+                        side_effect=RuntimeError("Network down")):
+                from outlook_web.services.external_api import poll_pending_probes
+                poll_pending_probes()
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            db = get_db()
+            row = db.execute("SELECT * FROM external_probe_cache WHERE id = ?", ("error-probe-1",)).fetchone()
+            self.assertEqual(row["status"], "error")
+            self.assertIn("Network down", row["error_message"])

@@ -65,4 +65,9 @@ def create_blueprint() -> Blueprint:
         view_func=emails_controller.api_external_wait_message,
         methods=["GET"],
     )
+    bp.add_url_rule(
+        "/api/external/probe/<probe_id>",
+        view_func=emails_controller.api_external_get_probe_status,
+        methods=["GET"],
+    )
     return bp

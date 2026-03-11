@@ -95,6 +95,36 @@ def _configure_telegram_push_job(scheduler, app) -> None:
     print(f"✓ Telegram 推送 Job 已配置（轮询间隔：{interval} 秒）")
 
 
+def _configure_probe_poll_job(scheduler, app) -> None:
+    """P2: 注册异步探测轮询 Job。每 5 秒执行一次，处理 pending 探测并清理过期记录。"""
+    from outlook_web.services.external_api import cleanup_expired_probes, poll_pending_probes
+
+    try:
+        scheduler.remove_job("external_probe_poll")
+    except Exception:
+        pass
+
+    def _probe_poll_task():
+        try:
+            poll_pending_probes(app)
+            cleanup_expired_probes(app, max_age_minutes=30)
+        except Exception:
+            pass
+
+    scheduler.add_job(
+        func=_probe_poll_task,
+        trigger="interval",
+        seconds=5,
+        id="external_probe_poll",
+        name="对外 API 异步探测",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=10,
+    )
+    print("✓ 对外 API 异步探测 Job 已配置（轮询间隔：5 秒）")
+
+
 def configure_scheduler_jobs(scheduler, app, test_refresh_token) -> None:
     """根据当前 settings 重新配置定时刷新 Job（配置变更即时生效）"""
     try:
@@ -127,6 +157,9 @@ def configure_scheduler_jobs(scheduler, app, test_refresh_token) -> None:
 
     # Telegram 推送 Job
     _configure_telegram_push_job(scheduler, app)
+
+    # P2: 异步探测轮询 Job（每 5 秒检查一次 pending 探测）
+    _configure_probe_poll_job(scheduler, app)
 
     # 刷新 Job：根据 enable_scheduled 决定是否启用
     try:
