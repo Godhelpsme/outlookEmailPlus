@@ -24,7 +24,8 @@ from outlook_web.security.crypto import (
 # v8：PRD-00008 P1 — 上游真实探测结果缓存表
 # v9：PRD-00008 P2 — 多 API Key 表
 # v10：PRD-00008 P2 — 调用方日级使用统计表
-DB_SCHEMA_VERSION = 10
+# v11：PRD-00009 MT-1 — 邮箱池字段（pool_status/claimed_by/...）+ account_claim_logs 表 + pool settings
+DB_SCHEMA_VERSION = 11
 DB_SCHEMA_VERSION_KEY = "db_schema_version"
 DB_SCHEMA_LAST_UPGRADE_TRACE_ID_KEY = "db_schema_last_upgrade_trace_id"
 DB_SCHEMA_LAST_UPGRADE_ERROR_KEY = "db_schema_last_upgrade_error"
@@ -124,7 +125,9 @@ def init_db(database_path: Optional[str] = None):
             """)
 
         # 在锁内读取当前 schema 版本（保证一致性）
-        row = cursor.execute("SELECT value FROM settings WHERE key = ?", (DB_SCHEMA_VERSION_KEY,)).fetchone()
+        row = cursor.execute(
+            "SELECT value FROM settings WHERE key = ?", (DB_SCHEMA_VERSION_KEY,)
+        ).fetchone()
         current_version = int(row["value"]) if row and row["value"] is not None else 0
 
         upgrading = current_version < DB_SCHEMA_VERSION
@@ -133,7 +136,9 @@ def init_db(database_path: Optional[str] = None):
             if db_existed:
                 try:
                     print("=" * 60)
-                    print(f"[升级提示] 检测到数据库需要升级：v{current_version} -> v{DB_SCHEMA_VERSION}")
+                    print(
+                        f"[升级提示] 检测到数据库需要升级：v{current_version} -> v{DB_SCHEMA_VERSION}"
+                    )
                     print(f"[升级提示] 强烈建议先备份数据库文件：{path}")
                     print(f'[升级提示] 示例：cp "{path}" "{path}.backup"')
                     print(f"[升级提示] trace_id={migration_trace_id}")
@@ -347,25 +352,39 @@ def init_db(database_path: Optional[str] = None):
         if "remark" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN remark TEXT")
         if "status" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'"
+            )
         if "updated_at" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            )
         if "last_refresh_at" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN last_refresh_at TIMESTAMP")
         if "account_type" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN account_type TEXT DEFAULT 'outlook'")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN account_type TEXT DEFAULT 'outlook'"
+            )
         if "provider" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN provider TEXT DEFAULT 'outlook'")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN provider TEXT DEFAULT 'outlook'"
+            )
         if "imap_host" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_host TEXT")
         if "imap_port" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN imap_port INTEGER DEFAULT 993")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN imap_port INTEGER DEFAULT 993"
+            )
         if "imap_password" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN imap_password TEXT")
         if "telegram_push_enabled" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_push_enabled INTEGER NOT NULL DEFAULT 0")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN telegram_push_enabled INTEGER NOT NULL DEFAULT 0"
+            )
         if "telegram_last_checked_at" not in columns:
-            cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_last_checked_at TEXT DEFAULT NULL")
+            cursor.execute(
+                "ALTER TABLE accounts ADD COLUMN telegram_last_checked_at TEXT DEFAULT NULL"
+            )
 
         cursor.execute("PRAGMA table_info(groups)")
         group_columns = [col[1] for col in cursor.fetchall()]
@@ -639,6 +658,64 @@ def init_db(database_path: Optional[str] = None):
             CREATE INDEX IF NOT EXISTS idx_external_api_consumer_usage_daily_key
             ON external_api_consumer_usage_daily(consumer_key, usage_date)
             """)
+
+        # v11: 邮箱池字段 + account_claim_logs 表（PRD-00009 MT-1）
+        cursor.execute("PRAGMA table_info(accounts)")
+        accounts_columns_v11 = [col[1] for col in cursor.fetchall()]
+        for col_def in [
+            ("pool_status", "TEXT DEFAULT NULL"),
+            ("claimed_by", "TEXT DEFAULT NULL"),
+            ("claimed_at", "TEXT DEFAULT NULL"),
+            ("lease_expires_at", "TEXT DEFAULT NULL"),
+            ("claim_token", "TEXT DEFAULT NULL"),
+            ("last_claimed_at", "TEXT DEFAULT NULL"),
+            ("last_result", "TEXT DEFAULT NULL"),
+            ("last_result_detail", "TEXT DEFAULT NULL"),
+            ("success_count", "INTEGER DEFAULT 0"),
+            ("fail_count", "INTEGER DEFAULT 0"),
+        ]:
+            if col_def[0] not in accounts_columns_v11:
+                cursor.execute(
+                    f"ALTER TABLE accounts ADD COLUMN {col_def[0]} {col_def[1]}"
+                )
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS account_claim_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                claim_token TEXT NOT NULL,
+                caller_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                result TEXT DEFAULT NULL,
+                detail TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_claim_logs_account_id
+            ON account_claim_logs(account_id)
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_claim_logs_task_id
+            ON account_claim_logs(task_id)
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_claim_logs_claim_token
+            ON account_claim_logs(claim_token)
+            """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_accounts_pool_status
+            ON accounts(pool_status)
+            """)
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('pool_cooldown_seconds', '86400')"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('pool_default_lease_seconds', '600')"
+        )
 
         # 迁移现有明文数据为加密数据
         migrate_sensitive_data(conn)
