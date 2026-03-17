@@ -87,6 +87,11 @@ python start.py
 - IMAP
 - APScheduler
 
+同时感谢以下参考项目提供的思路与启发：
+
+- [assast/outlookEmail](https://github.com/assast/outlookEmail)
+- [gblaowang-i/MailAggregator_Pro](https://github.com/gblaowang-i/MailAggregator_Pro)
+
 ## 许可证
 
 Apache License 2.0
