@@ -1,33 +1,60 @@
 # Outlook Email Plus
 
-A web application for unified Outlook / IMAP mailbox management, email reading, verification code extraction, and mail pool orchestration for registration and automation workflows.
+Outlook Email Plus is a mailbox aggregation web app for registration, verification, and multi-account automation workflows. It brings Outlook OAuth mailboxes, IMAP mailboxes, GPTMail temp mailboxes, verification-code extraction, notifications, controlled external APIs, and mail-pool orchestration into one interface.
 
 [中文 README](./README.md) | [English README](./README.en.md)
 
-## Why This Project
+## What This Project Is
 
-- Manage Outlook OAuth mailboxes and IMAP mailboxes in one interface to avoid switching between multiple tools.
-- Go beyond a simple inbox viewer with built-in support for verification code extraction, link extraction, and mail-pool-based workflow automation.
-- Support bulk import, groups, tags, and search for long-term multi-account maintenance.
-- Start locally in minutes or deploy with Docker at low operational cost.
-- Provide controlled external APIs and mail pool capabilities for registration, verification, and automation scripts.
+This is not just an inbox viewer.
 
-## Core Features
+It is better suited for workflows such as:
 
-- Multi-mailbox account management with bulk import, groups, tags, and search
-- Outlook OAuth and IMAP integration for multiple mailbox providers
-- Email reading and verification code extraction for registration, login, and verification scenarios
-- Mail pool management with claim, release, completion, and status transitions
-- Optional extensions such as Telegram notifications, temporary mailboxes, and controlled external APIs
+- maintaining large sets of mailboxes in one place
+- reading registration codes, verification links, and notification emails automatically
+- exposing mailbox resources to workers through a controlled mail pool
+- running a public demo site without exposing high-risk settings to visitors
 
-## Typical Use Cases
+## Recent Updates
 
-- Maintain multiple Outlook / IMAP mailbox accounts from one place
-- Process registration codes, verification links, and notification emails at scale
-- Connect mailbox accounts to a mail pool for external job claiming and recycling
-- Expose controlled mail capabilities to internal scripts or automation systems
+This README has been refreshed to match the latest functional changes, including:
 
-## Deployment
+- broader bilingual UI and i18n coverage
+- unified notification dispatch for business email notifications and Telegram delivery
+- hardened external API controls with single-key, multi-key, IP allowlists, rate limits, and risky-endpoint guards
+- mail-pool integrations consolidated under `/api/external/pool/*`
+- removal of the old anonymous `/api/pool/*` endpoints
+- a new demo-site guard that can disable login password changes from Settings
+
+## Core Capabilities
+
+- Multi-mailbox management
+  Supports Outlook OAuth, regular IMAP mailboxes, and GPTMail temp mailboxes
+- Bulk import and organization
+  Supports import, groups, tags, search, and export
+- Mail reading and extraction
+  Extract verification codes, links, and raw message content
+- Mail pool orchestration
+  Supports claim, release, complete, cooldown recovery, and stale-claim cleanup
+- Controlled external APIs
+  Supports `X-API-Key`, multiple consumer keys, scoped mailbox access, IP allowlists, and rate limiting
+- Notification delivery
+  Supports business email notifications, Telegram push, and test delivery from Settings
+- Demo-site protection
+  Lets you lock login-password changes at the site level with an environment variable
+
+## Project Layout
+
+```text
+outlook_web/          Main Flask application (controllers / routes / services / repositories)
+templates/            HTML templates
+static/               Frontend scripts and styles
+data/                 SQLite data and runtime files
+tests/                Automated tests
+web_outlook_app.py    Backward-compatible entrypoint
+```
+
+## Quick Start
 
 ### Docker
 
@@ -46,43 +73,66 @@ docker run -d \
 
 Notes:
 
-- Mount `data/` for persistence.
-- Use a stable and secure value for `SECRET_KEY`.
+- Always mount `data/` if you want persistent runtime data
+- `SECRET_KEY` must be stable and strong
+- For demo sites, explicitly set `ALLOW_LOGIN_PASSWORD_CHANGE=false`
 
-### Local Setup
+### Local Run
 
 ```bash
 python -m venv .venv
 pip install -r requirements.txt
-python start.py
+python web_outlook_app.py
 ```
 
-Common environment variables:
+### Run Tests
 
-- `SECRET_KEY`: encryption key for sessions and sensitive fields
-- `LOGIN_PASSWORD`: admin login password
-- `ALLOW_LOGIN_PASSWORD_CHANGE`: whether the login password can be changed in Settings; set `false` for demo sites
-- `DATABASE_PATH`: SQLite database path
-- `OAUTH_CLIENT_ID`: Outlook OAuth application ID
-- `OAUTH_REDIRECT_URI`: Outlook OAuth callback URL
+```bash
+python -m unittest discover -s tests -v
+```
 
-### Email Notification Configuration
+## Common Environment Variables
 
-If you want to enable the built-in email notification channel, you must configure a dedicated SMTP service for business notifications. This is separate from GPTMail and Telegram and cannot be substituted by either of them.
+- `SECRET_KEY`
+  Required session and secret-encryption key
+- `LOGIN_PASSWORD`
+  Initial admin login password; it is stored in the database as a hash after initialization
+- `ALLOW_LOGIN_PASSWORD_CHANGE`
+  Whether the login password can be changed in Settings. Set this to `false` for demo sites
+- `DATABASE_PATH`
+  SQLite path, default `data/outlook_accounts.db`
+- `PORT` / `HOST`
+  Web bind address
+- `SCHEDULER_AUTOSTART`
+  Whether background scheduler jobs start automatically
+- `OAUTH_CLIENT_ID`
+  Outlook OAuth app ID
+- `OAUTH_REDIRECT_URI`
+  Outlook OAuth callback URL
+- `GPTMAIL_BASE_URL`
+  GPTMail service base URL
+- `GPTMAIL_API_KEY`
+  GPTMail API key for temp-mail features
+
+## Notification Channels
+
+### Email Notifications
+
+If you want business email notifications, configure a dedicated SMTP service. This channel is independent from Telegram and GPTMail.
 
 Minimum required variables:
 
-- `EMAIL_NOTIFICATION_SMTP_HOST`: SMTP server host
-- `EMAIL_NOTIFICATION_FROM`: sender email address
+- `EMAIL_NOTIFICATION_SMTP_HOST`
+- `EMAIL_NOTIFICATION_FROM`
 
 Common optional variables:
 
-- `EMAIL_NOTIFICATION_SMTP_PORT`: SMTP port, default `25`
-- `EMAIL_NOTIFICATION_SMTP_USERNAME`: SMTP login username
-- `EMAIL_NOTIFICATION_SMTP_PASSWORD`: SMTP login password or app-specific password
-- `EMAIL_NOTIFICATION_SMTP_USE_TLS`: enable STARTTLS
-- `EMAIL_NOTIFICATION_SMTP_USE_SSL`: enable SSL
-- `EMAIL_NOTIFICATION_SMTP_TIMEOUT`: SMTP timeout in seconds, default `15`
+- `EMAIL_NOTIFICATION_SMTP_PORT`
+- `EMAIL_NOTIFICATION_SMTP_USERNAME`
+- `EMAIL_NOTIFICATION_SMTP_PASSWORD`
+- `EMAIL_NOTIFICATION_SMTP_USE_TLS`
+- `EMAIL_NOTIFICATION_SMTP_USE_SSL`
+- `EMAIL_NOTIFICATION_SMTP_TIMEOUT`
 
 Example:
 
@@ -97,27 +147,57 @@ EMAIL_NOTIFICATION_SMTP_USE_TLS=false
 EMAIL_NOTIFICATION_SMTP_TIMEOUT=15
 ```
 
-Common error codes:
-
-- `EMAIL_NOTIFICATION_SERVICE_UNAVAILABLE`
-  Meaning: the system does not have a usable SMTP configuration for email notifications. The most common cause is missing `EMAIL_NOTIFICATION_SMTP_HOST` or `EMAIL_NOTIFICATION_FROM`.
-- `EMAIL_NOTIFICATION_SMTP_PORT_INVALID`
-  Meaning: `EMAIL_NOTIFICATION_SMTP_PORT` is not a valid positive integer.
-- `EMAIL_NOTIFICATION_SMTP_TIMEOUT_INVALID`
-  Meaning: `EMAIL_NOTIFICATION_SMTP_TIMEOUT` is not a valid positive integer.
-- `EMAIL_NOTIFICATION_RECIPIENT_REQUIRED`
-  Meaning: email notifications were enabled in settings, but the recipient email address was left empty.
-- `EMAIL_NOTIFICATION_RECIPIENT_NOT_CONFIGURED`
-  Meaning: the “Send Test Email” action could not find a saved notification recipient.
-
 Important behavior:
 
-- The settings page follows a “save first, then test” rule.
-- The test endpoint does not read a temporary recipient from the input field.
-- It only uses the persisted `email_notification_recipient` in settings.
-- The correct flow is: save the recipient first, then click “Send Test Email”.
+- the Settings page follows a save-first-then-test flow
+- the test endpoint does not read temporary form values
+- the system only uses the persisted `email_notification_recipient`
+
+### Telegram Delivery
+
+The Settings page supports:
+
+- `telegram_bot_token`
+- `telegram_chat_id`
+- `telegram_poll_interval`
+
+In the current version, Telegram delivery and business email notifications are both handled through the unified notification-dispatch flow.
+
+## External API and Mail Pool Integration
+
+If you need to connect this project to registration workers or other automation systems, the recommended integration path is the controlled external API:
+
+- path prefix: `/api/external/*`
+- auth header: `X-API-Key`
+- mail-pool endpoints: `/api/external/pool/*`
+
+Current external API controls include:
+
+- single-key authentication
+- multi-key configuration
+- mailbox scoping per consumer
+- public-mode allowlists and rate limits
+- optional disabling of raw-content and long-poll style risky endpoints
+
+Notes:
+
+- the old anonymous `/api/pool/*` endpoints are gone
+- for production, enable controlled public mode and configure IP allowlists
+
+## Demo Site Recommendation
+
+If you want to expose a demo site to other users, start with at least this:
+
+```env
+LOGIN_PASSWORD=your-strong-password
+ALLOW_LOGIN_PASSWORD_CHANGE=false
+```
+
+This keeps the site usable while preventing visitors from changing the admin login password in Settings.
 
 ## UI Preview
+
+The repository already includes a few screenshots, and you can add more later as the UI evolves.
 
 ![Dashboard](img/仪表盘.png)
 ![Mailbox View](img/邮箱界面.png)
@@ -130,17 +210,11 @@ Important behavior:
 - [Registration Worker and Mail Pool API](./docs/API/registration-mail-pool-api.en.md)
 - [中文注册与邮箱池接口文档](./docs/API/注册与邮箱池接口文档.md)
 
-If you need to connect registration workers or other batch automation jobs, start with the document above.
-
-The current worker integration contract is:
-
-- Path prefix: `/api/external/pool/*`
-- Auth header: `X-API-Key`
-- The old anonymous `/api/pool/*` endpoints have been removed
+If you are integrating workers or batch workflows, start with the external API and mail-pool docs.
 
 ## Acknowledgements
 
-This project is built on the following open-source technologies and service capabilities:
+This project builds on:
 
 - Flask
 - SQLite
@@ -148,7 +222,7 @@ This project is built on the following open-source technologies and service capa
 - IMAP
 - APScheduler
 
-The following reference projects also provided useful ideas and inspiration:
+It also draws inspiration from:
 
 - [assast/outlookEmail](https://github.com/assast/outlookEmail)
 - [gblaowang-i/MailAggregator_Pro](https://github.com/gblaowang-i/MailAggregator_Pro)
