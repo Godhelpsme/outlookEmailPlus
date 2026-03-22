@@ -81,7 +81,7 @@ class V190FrontendContractTests(unittest.TestCase):
         login_html = self._get_text(client, "/login")
         self.assertIn("/static/js/i18n.js", index_html)
         self.assertIn("/static/js/i18n.js", login_html)
-        self.assertIn('id="telegramPollInterval" min="60" max="3600"', index_html)
+        self.assertIn('id="telegramPollInterval" min="10" max="86400"', index_html)
 
     def test_key_email_notification_translations_exist(self):
         client = self.app.test_client()
@@ -89,6 +89,9 @@ class V190FrontendContractTests(unittest.TestCase):
         for text in [
             "邮件通知",
             "启用邮件通知",
+            "启用 Email 通知",
+            "Email 通知",
+            "Telegram 通知",
             "接收通知邮箱",
             "发送测试邮件",
             "📤 导出",
@@ -103,7 +106,20 @@ class V190FrontendContractTests(unittest.TestCase):
             "手动",
             "定时",
             "✉️ 邮件通知",
+            "✉️ Email 通知",
+            "📬 Telegram 通知",
             "📬 Telegram 推送",
+            "这里只配置 Email 通知通道。普通邮箱需在账号列表开启通知后才会通过 Email 发送；临时邮箱按当前通知规则处理。启用后仅从新到达的邮件开始通知。",
+            "这里只配置 Email 渠道的接收邮箱，不会让所有普通邮箱自动发送。",
+            "这里只配置 Telegram 通知通道。普通邮箱需在账号列表开启通知后才会通过 Telegram 发送；临时邮箱按当前通知规则处理。",
+            "验证当前 Telegram 通知通道是否配置正确",
+            "通知",
+            "该邮箱通知参与",
+            "开启该邮箱通知参与",
+            "该邮箱通知参与（已开启）",
+            "该邮箱通知参与已开启",
+            "该邮箱通知参与已关闭",
+            "点击关闭该邮箱通知参与",
             "关闭时（默认）仅做 API Key 鉴权；开启后额外启用 IP 白名单、限流、高风险端点禁用等安全策略。",
             "建议设置为 30 天，防止 Token 因 90 天不使用而过期",
             "默认分组",
@@ -165,9 +181,27 @@ class V190FrontendContractTests(unittest.TestCase):
         self.assertIn("translateAppTextLocal('支持混合格式，每行一个账号", accounts_js)
         self.assertIn("translateAppTextLocal('请选择标签...')", main_js)
         self.assertIn("translateAppTextLocal('请选择分组...')", main_js)
-        self.assertIn("translateAppTextLocal('推送')", groups_js)
+        self.assertIn("translateAppTextLocal('通知')", groups_js)
+        self.assertIn("translateAppTextLocal('点击关闭该邮箱通知参与')", groups_js)
+        self.assertIn("translateAppTextLocal(notificationEnabled ? '该邮箱通知参与（已开启）' : '开启该邮箱通知参与')", groups_js)
         self.assertIn("translateAppTextLocal('收件箱为空')", emails_js)
         self.assertIn("translateAppTextLocal('暂无邮件')", temp_emails_js)
+
+    def test_notification_copy_matches_channel_vs_account_model(self):
+        client = self.app.test_client()
+        self._login(client)
+        index_html = self._get_text(client, "/")
+        groups_js = self._get_text(client, "/static/js/features/groups.js")
+
+        self.assertIn("✉️ Email 通知", index_html)
+        self.assertIn("📬 Telegram 通知", index_html)
+        self.assertIn("这里只配置 Email 通知通道。普通邮箱需在账号列表开启通知后才会通过 Email 发送；临时邮箱按当前通知规则处理。启用后仅从新到达的邮件开始通知。", index_html)
+        self.assertIn("这里只配置 Email 渠道的接收邮箱，不会让所有普通邮箱自动发送。", index_html)
+        self.assertIn("这里只配置 Telegram 通知通道。普通邮箱需在账号列表开启通知后才会通过 Telegram 发送；临时邮箱按当前通知规则处理。", index_html)
+        self.assertNotIn("全局生效，覆盖普通邮箱和临时邮箱；仅从启用后新到达的邮件开始通知。", index_html)
+        self.assertNotIn("只需填写接收邮箱，不暴露复杂邮件网关配置。关闭通知后可保留该邮箱。", index_html)
+        self.assertIn("acc.notification_enabled !== undefined", groups_js)
+        self.assertIn("const response = await fetch(`/api/accounts/search?q=${encodeURIComponent(query)}`);", groups_js)
 
     def test_frontend_import_and_export_error_contract_helpers_are_consumed(self):
         client = self.app.test_client()
@@ -180,6 +214,74 @@ class V190FrontendContractTests(unittest.TestCase):
         self.assertIn("translateAppTextLocal('【用户错误信息】')", main_js)
         self.assertIn("translateAppTextLocal('【错误详情】')", main_js)
         self.assertIn("translateAppTextLocal('【技术堆栈/细节】')", main_js)
+
+    def test_outlook_oauth_modal_uses_local_verify_token_contract_and_explains_client_id(self):
+        client = self.app.test_client()
+        self._login(client)
+        main_js = self._get_text(client, "/static/js/main.js")
+        index_html = self._get_text(client, "/")
+
+        self.assertIn("fetch('/api/export/verify'", main_js)
+        self.assertIn("verify_token: verifyData.verify_token", main_js)
+        self.assertIn("window.addEventListener('message'", main_js)
+        self.assertIn("payload.type !== 'outlook-oauth-callback'", main_js)
+        self.assertIn("event.source?.postMessage({ type: 'outlook-oauth-callback-ack' }, event.origin);", main_js)
+        self.assertIn("handleApiError(data, '获取授权链接失败');", main_js)
+        self.assertIn("state=<generated-by-system>", main_js)
+        self.assertNotIn("state=12345", main_js)
+        self.assertIn("Azure / Microsoft OAuth 应用级配置", index_html)
+        self.assertIn("用于本系统二次验证，不是微软邮箱密码", index_html)
+
+    def test_frontend_polling_settings_preserve_zero_value(self):
+        client = self.app.test_client()
+        self._login(client)
+        main_js = self._get_text(client, "/static/js/main.js")
+        index_html = self._get_text(client, "/")
+
+        self.assertIn("function parseIntegerSetting(value, fallback)", main_js)
+        self.assertIn("let autoPollingEnabled = false;", main_js)
+        self.assertIn("function syncPollingForCurrentAccount({ restart = false, forceRefresh = false } = {})", main_js)
+        self.assertIn("function applyPollingSettings(settings, { restart = false, forceRefresh = false } = {})", main_js)
+        self.assertIn("autoPollingEnabled = isAutoPollingEnabledSetting(settings.enable_auto_polling);", main_js)
+        self.assertIn("String(parseIntegerSetting(data.settings.polling_count, 5))", main_js)
+        self.assertIn("maxPollingCount = parseIntegerSetting(settings.polling_count, 5);", main_js)
+        self.assertIn("applyPollingSettings(settings, { restart: true });", main_js)
+        self.assertNotIn("data.settings.polling_count || '5'", main_js)
+        self.assertNotIn("parseInt(data.settings.polling_count) || 5", main_js)
+        self.assertIn('id="pollingCount" min="0" max="100" value="5"', index_html)
+        self.assertIn("范围：0-100 次，设置为 0 表示持续轮询", index_html)
+
+    def test_frontend_auto_polling_uses_shared_runtime_state_for_account_selection_and_email_load(self):
+        client = self.app.test_client()
+        main_js = self._get_text(client, "/static/js/main.js")
+        accounts_js = self._get_text(client, "/static/js/features/accounts.js")
+        emails_js = self._get_text(client, "/static/js/features/emails.js")
+
+        self.assertIn("if (!autoPollingEnabled) {", main_js)
+        self.assertIn("stopPolling(true);", main_js)
+        self.assertIn("syncPollingForCurrentAccount({ restart: true });", accounts_js)
+        self.assertIn("syncPollingForCurrentAccount();", emails_js)
+        self.assertNotIn("fetch('/api/settings')", emails_js)
+
+    def test_account_panel_density_sync_runs_on_init_and_mailbox_navigation(self):
+        client = self.app.test_client()
+        main_js = self._get_text(client, "/static/js/main.js")
+
+        self.assertIn("let accountPanelDensitySyncHandle = null;", main_js)
+        self.assertIn("function syncAccountPanelDensityIfVisible()", main_js)
+        self.assertIn("function scheduleAccountPanelDensitySync()", main_js)
+        self.assertIn("syncAccountPanelDensityIfVisible();", main_js)
+        self.assertIn("scheduleAccountPanelDensitySync();", main_js)
+        self.assertIn("window.addEventListener('resize', scheduleAccountPanelDensitySync, { passive: true });", main_js)
+        self.assertIn("if (page === 'mailbox') {", main_js)
+
+    def test_account_edit_uses_conditional_outlook_credential_validation(self):
+        client = self.app.test_client()
+        accounts_js = self._get_text(client, "/static/js/features/accounts.js")
+        self.assertIn("clientIdInput.dataset.originalValue = acc.client_id || '';", accounts_js)
+        self.assertIn("const wantsToUpdateOutlookCredentials = !isImap && (hasClientIdChanged || !!refreshToken);", accounts_js)
+        self.assertIn("if (wantsToUpdateOutlookCredentials && (!data.client_id || !data.refresh_token))", accounts_js)
+        self.assertNotIn("if (!isImap && (!data.client_id || !data.refresh_token))", accounts_js)
 
     def test_collapsed_sidebar_hides_github_label_to_avoid_overlap(self):
         client = self.app.test_client()

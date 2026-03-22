@@ -1078,86 +1078,6 @@ class TestFetchAccountEmails(unittest.TestCase):
         )
         mock_imap.assert_not_called()
 
-    def test_imap_folder_resolution_uses_provider_specific_candidates_for_gmail_junk(self):
-        from outlook_web.services.telegram_push import _resolve_imap_folder
-
-        account = {"email": "x@gmail.com", "provider": "gmail"}
-
-        candidates = _resolve_imap_folder(account, "junkemail")
-
-        self.assertIn("[Gmail]/Spam", candidates)
-        self.assertNotIn("Junk Email", candidates)
-
-    def test_imap_folder_resolution_keeps_default_fallback_for_unknown_provider_junk_email(self):
-        from outlook_web.services.telegram_push import _resolve_imap_folder
-
-        account = {"email": "x@custom.test", "provider": "unknown-provider"}
-
-        candidates = _resolve_imap_folder(account, "junkemail")
-
-        self.assertIn("Junk Email", candidates)
-        self.assertIn('"Junk Email"', candidates)
-
-    def test_imap_fetch_continues_when_one_folder_candidate_raises_parse_error(self):
-        from outlook_web.services.telegram_push import _fetch_new_emails_imap
-
-        account = {
-            "email": "x@gmail.com",
-            "provider": "gmail",
-            "imap_host": "imap.gmail.com",
-            "imap_port": 993,
-            "imap_password": "",
-        }
-
-        conn = MagicMock()
-        conn.select.side_effect = [
-            Exception("EXAMINE command error: BAD [b'Could not parse command']"),
-            ("OK", [b"1"]),
-        ]
-        conn.search.return_value = ("OK", [b""])
-
-        with patch("imaplib.IMAP4_SSL", return_value=conn):
-            emails = _fetch_new_emails_imap(
-                account,
-                "2026-03-01T00:00:00",
-                folder="junkemail",
-            )
-
-        self.assertEqual(emails, [])
-        self.assertEqual(conn.select.call_count, 2)
-
-    def test_imap_fetch_retries_quoted_folder_name_after_space_name_parse_error(self):
-        from outlook_web.services.telegram_push import _fetch_new_emails_imap
-
-        account = {
-            "email": "x@custom.test",
-            "provider": "unknown-provider",
-            "imap_host": "imap.custom.test",
-            "imap_port": 993,
-            "imap_password": "",
-        }
-
-        conn = MagicMock()
-        conn.select.side_effect = [
-            ("NO", [b"not found"]),
-            Exception("EXAMINE command error: BAD [b'Could not parse command']"),
-            ("OK", [b"1"]),
-        ]
-        conn.search.return_value = ("OK", [b""])
-
-        with patch("imaplib.IMAP4_SSL", return_value=conn):
-            emails = _fetch_new_emails_imap(
-                account,
-                "2026-03-01T00:00:00",
-                folder="junkemail",
-            )
-
-        self.assertEqual(emails, [])
-        self.assertEqual(
-            [call.args[0] for call in conn.select.call_args_list],
-            ["Junk", "Junk Email", '"Junk Email"'],
-        )
-
     def test_outlook_provider_with_imap_account_type_uses_imap_fetch(self):
         """历史坏数据：provider=outlook 但 account_type=imap 时，应走 IMAP fetch。"""
         from outlook_web.services.telegram_push import _fetch_account_emails
@@ -1176,45 +1096,6 @@ class TestFetchAccountEmails(unittest.TestCase):
             _fetch_account_emails(account)
         self.assertEqual(mock_imap.call_count, 2)
         mock_graph.assert_not_called()
-
-
-class TestImapFolderResolution(unittest.TestCase):
-    def test_resolve_imap_folder_uses_provider_specific_candidates(self):
-        from outlook_web.services.telegram_push import _resolve_imap_folder
-
-        account = {"email": "qq-folder@test.com", "provider": "qq"}
-
-        self.assertEqual(_resolve_imap_folder(account, "junkemail"), ["Junk", "&V4NXPpCuTvY-"])
-
-    def test_resolve_imap_folder_can_infer_provider_from_email(self):
-        from outlook_web.services.telegram_push import _resolve_imap_folder
-
-        account = {"email": "inferred@163.com", "provider": "imap"}
-
-        self.assertEqual(_resolve_imap_folder(account, "junkemail"), ["&V4NXPpCuTvY-"])
-
-    def test_fetch_new_emails_imap_tries_provider_specific_junk_folders(self):
-        from outlook_web.services.telegram_push import _fetch_new_emails_imap
-
-        account = {
-            "email": "folder@qq.com",
-            "provider": "qq",
-            "imap_host": "imap.qq.com",
-            "imap_port": 993,
-            "imap_password": "enc:dummy",
-        }
-        conn = MagicMock()
-        conn.select.side_effect = [("NO", []), ("OK", [])]
-        conn.search.return_value = ("OK", [b""])
-
-        with patch("imaplib.IMAP4_SSL", return_value=conn), patch(
-            "outlook_web.security.crypto.decrypt_data", return_value="plain-password"
-        ):
-            emails = _fetch_new_emails_imap(account, "2026-03-01T00:00:00", folder="junkemail")
-
-        self.assertEqual(emails, [])
-        self.assertEqual([call.args[0] for call in conn.select.call_args_list], ["Junk", "&V4NXPpCuTvY-"])
-        conn.login.assert_called_once_with("folder@qq.com", "plain-password")
 
 
 class TestParallelJobBehavior(unittest.TestCase):

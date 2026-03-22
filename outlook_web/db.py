@@ -397,6 +397,11 @@ def init_db(database_path: Optional[str] = None):
         if "run_id" not in refresh_log_columns:
             cursor.execute("ALTER TABLE account_refresh_logs ADD COLUMN run_id TEXT")
 
+        cursor.execute("PRAGMA table_info(temp_email_messages)")
+        temp_email_message_columns = [col[1] for col in cursor.fetchall()]
+        if "raw_content" not in temp_email_message_columns:
+            cursor.execute("ALTER TABLE temp_email_messages ADD COLUMN raw_content TEXT")
+
         cursor.execute("PRAGMA table_info(audit_logs)")
         audit_columns = [col[1] for col in cursor.fetchall()]
         if "trace_id" not in audit_columns:

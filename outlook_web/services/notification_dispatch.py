@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -85,6 +84,22 @@ def list_email_notification_sources() -> list[dict[str, Any]]:
     return [_normalize_account_source(acc) for acc in accounts] + [_normalize_temp_email_source(item) for item in temp_emails]
 
 
+def _is_account_notification_participant(account: dict[str, Any]) -> bool:
+    """账号级通知参与开关。
+
+    兼容旧模型：底层仍复用 telegram_push_enabled 存储该账号是否参与任意通知渠道。
+    """
+    return bool(account.get("telegram_push_enabled"))
+
+
+def _is_source_notification_enabled(source: dict[str, Any]) -> bool:
+    if source["source_type"] != SOURCE_ACCOUNT:
+        return True
+
+    account = source.get("account") or {}
+    return _is_account_notification_participant(account)
+
+
 def bootstrap_channel_cursors(channel: str, *, cursor_value: str | None = None) -> None:
     target_cursor = cursor_value or utc_now_iso()
     for source in list_email_notification_sources():
@@ -151,7 +166,7 @@ def _fetch_account_messages(source: dict[str, Any], since: str) -> list[dict[str
     emails: list[dict[str, Any]] = []
     for folder in ACCOUNT_INCLUDED_FOLDERS:
         try:
-            if (account.get("provider") or "outlook") == "outlook":
+            if telegram_push._should_fetch_account_via_graph(account):
                 fetched = telegram_push._fetch_new_emails_graph(account, since, folder=folder)
             else:
                 fetched = telegram_push._fetch_new_emails_imap(account, since, folder=folder)
@@ -160,9 +175,7 @@ def _fetch_account_messages(source: dict[str, Any], since: str) -> list[dict[str
                 enriched["folder"] = folder
                 emails.append(enriched)
         except Exception as exc:
-            logger.warning(
-                "[notification_dispatch] account fetch failed source=%s folder=%s err=%s", source["label"], folder, exc
-            )
+            logger.warning("[notification_dispatch] account fetch failed source=%s folder=%s err=%s", source["label"], folder, exc)
             raise
     return emails
 
@@ -227,13 +240,6 @@ def send_business_email_notification(source: dict[str, Any], message: dict[str, 
         body_text = body_text[:MAX_EMAIL_BODY_LENGTH].rstrip() + "\n\n...[truncated]"
     if not body_text:
         body_text = "(正文为空)"
-
-    safe_source_label = html.escape(str(source.get("label") or ""), quote=True)
-    safe_folder = html.escape(str(folder or ""), quote=True)
-    safe_sender = html.escape(str(message.get("sender") or "-"), quote=True)
-    safe_subject = html.escape(str(message.get("subject") or "无主题"), quote=True)
-    safe_received_at = html.escape(str(received_at or "-"), quote=True)
-    safe_body_text = html.escape(str(body_text), quote=True).replace("\n", "<br>")
     text_body = (
         f"邮箱来源: {source['label']}\n"
         f"来源类型: {'普通邮箱' if source['source_type'] == SOURCE_ACCOUNT else '临时邮箱'}\n"
@@ -244,13 +250,13 @@ def send_business_email_notification(source: dict[str, Any], message: dict[str, 
         f"正文:\n{body_text}"
     )
     html_body = (
-        f"<p><strong>邮箱来源:</strong> {safe_source_label}</p>"
+        f"<p><strong>邮箱来源:</strong> {source['label']}</p>"
         f"<p><strong>来源类型:</strong> {'普通邮箱' if source['source_type'] == SOURCE_ACCOUNT else '临时邮箱'}</p>"
-        f"<p><strong>目录:</strong> {safe_folder}</p>"
-        f"<p><strong>发件人:</strong> {safe_sender}</p>"
-        f"<p><strong>主题:</strong> {safe_subject}</p>"
-        f"<p><strong>时间:</strong> {safe_received_at}</p>"
-        f"<p><strong>正文:</strong><br>{safe_body_text}</p>"
+        f"<p><strong>目录:</strong> {folder}</p>"
+        f"<p><strong>发件人:</strong> {message.get('sender') or '-'}</p>"
+        f"<p><strong>主题:</strong> {message.get('subject') or '无主题'}</p>"
+        f"<p><strong>时间:</strong> {received_at}</p>"
+        f"<p><strong>正文:</strong><br>{body_text.replace(chr(10), '<br>')}</p>"
     )
     email_push.send_email_message(
         recipient=recipient,
@@ -436,25 +442,29 @@ def _is_email_channel_enabled() -> bool:
     return enabled and email_push.is_email_notification_ready()
 
 
+def _is_telegram_channel_enabled(telegram_runtime: dict[str, str] | None) -> bool:
+    return telegram_runtime is not None
+
+
 def _build_active_channels_for_source(
     source: dict[str, Any],
     *,
     email_enabled: bool,
     telegram_runtime: dict[str, str] | None,
 ) -> list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], None], int]]:
+    if not _is_source_notification_enabled(source):
+        return []
+
     active_channels: list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], None], int]] = []
 
     if email_enabled:
         active_channels.append((CHANNEL_EMAIL, send_business_email_notification, MAX_EMAIL_NOTIFICATIONS_PER_JOB))
 
-    account = source.get("account") or {}
-    if telegram_runtime and source["source_type"] == SOURCE_ACCOUNT and bool(account.get("telegram_push_enabled")):
+    if telegram_runtime is not None and source["source_type"] == SOURCE_ACCOUNT:
         active_channels.append(
             (
                 CHANNEL_TELEGRAM,
-                lambda current_source, message, bot_token=telegram_runtime["bot_token"], chat_id=telegram_runtime[
-                    "chat_id"
-                ]: send_business_telegram_notification(  # noqa: E731
+                lambda current_source, message, bot_token=telegram_runtime["bot_token"], chat_id=telegram_runtime["chat_id"]: send_business_telegram_notification(  # noqa: E731
                     current_source,
                     message,
                     bot_token=bot_token,
@@ -475,7 +485,7 @@ def run_notification_dispatch_job(app) -> None:
 
         email_enabled = _is_email_channel_enabled()
         telegram_runtime = _get_telegram_runtime_config()
-        if not email_enabled and not telegram_runtime:
+        if not email_enabled and not _is_telegram_channel_enabled(telegram_runtime):
             return
 
         job_start = utc_now_iso()
@@ -548,9 +558,10 @@ def run_email_notification_job(app) -> None:
         enabled = settings_repo.get_setting("email_notification_enabled", "false").lower() == "true"
         if not enabled or not email_push.is_email_notification_ready():
             return
+        sources = [source for source in list_email_notification_sources() if _is_source_notification_enabled(source)]
         process_channel_for_sources(
             channel=CHANNEL_EMAIL,
-            sources=list_email_notification_sources(),
+            sources=sources,
             sender=send_business_email_notification,
             max_notifications=MAX_EMAIL_NOTIFICATIONS_PER_JOB,
         )

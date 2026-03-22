@@ -13,7 +13,6 @@ from outlook_web.repositories import accounts as accounts_repo
 from outlook_web.repositories import groups as groups_repo
 from outlook_web.security.auth import api_key_required, login_required
 from outlook_web.security.external_api_guard import external_api_guards
-from outlook_web.services import account_compact_summary as compact_summary_service
 from outlook_web.services import email_delete as email_delete_service
 from outlook_web.services import external_api as external_api_service
 from outlook_web.services import graph as graph_service
@@ -40,47 +39,7 @@ def _build_response_from_error_payload(error_payload: dict[str, Any]):
     )
 
 
-def _resolve_external_error_code(exc: external_api_service.ExternalApiError) -> str:
-    nested_error = exc.data if isinstance(exc.data, dict) else {}
-    nested_code = str(nested_error.get("code") or "").strip()
-    if exc.code == "UPSTREAM_READ_FAILED" and nested_code in _EXTERNAL_NESTED_UPSTREAM_CODES:
-        return nested_code
-    return exc.code
-
-
-def _resolve_external_error_response(exc: external_api_service.ExternalApiError):
-    nested_error = exc.data if isinstance(exc.data, dict) else {}
-    nested_code = str(nested_error.get("code") or "").strip()
-    if exc.code == "UPSTREAM_READ_FAILED" and nested_code in _EXTERNAL_NESTED_UPSTREAM_CODES:
-        return jsonify(external_api_service.fail(nested_code, str(nested_error.get("message") or exc.message), data=nested_error)), int(
-            nested_error.get("status") or exc.status or 500
-        )
-    return _external_error_response(exc)
-
-
 # ==================== 邮件 API ====================
-
-
-def _build_account_credential_error_response(email_addr: str, account: dict[str, Any]):
-    credential_errors = account.get("_credential_errors") or []
-    failed_fields = [item.get("field", "") for item in credential_errors if item.get("field")]
-    return build_error_response(
-        "ACCOUNT_CREDENTIAL_DECRYPT_FAILED",
-        "账号凭据解密失败，请检查 SECRET_KEY 或重新导入账号",
-        message_en="Failed to decrypt account credentials. Check SECRET_KEY or re-import the account",
-        err_type="CredentialDecryptError",
-        status=500,
-        details={
-            "email": email_addr,
-            "fields": failed_fields,
-        },
-        extra={
-            "details": {
-                "email": email_addr,
-                "fields": failed_fields,
-            }
-        },
-    )
 
 
 @login_required
@@ -89,16 +48,7 @@ def api_get_emails(email_addr: str) -> Any:
     account = accounts_repo.get_account_by_email(email_addr)
 
     if not account:
-        return build_error_response(
-            "ACCOUNT_NOT_FOUND",
-            "账号不存在",
-            message_en="Account not found",
-            err_type="NotFoundError",
-            status=404,
-            details=f"email={email_addr}",
-        )
-    if account.get("_credential_errors"):
-        return _build_account_credential_error_response(email_addr, account)
+        return build_error_response("ACCOUNT_NOT_FOUND", "账号不存在", message_en="Account not found", err_type="NotFoundError", status=404, details=f"email={email_addr}")
 
     folder = request.args.get("folder", "inbox")  # inbox, junkemail, deleteditems
     skip = int(request.args.get("skip", 0))
@@ -117,12 +67,6 @@ def api_get_emails(email_addr: str) -> Any:
             skip=skip,
             top=top,
         )
-        if result.get("success"):
-            result["account_summary"] = compact_summary_service.update_summary_from_message_list(
-                int(account["id"]),
-                result.get("emails") or [],
-                folder=folder,
-            )
         return jsonify(result)
 
     # 获取分组代理设置
@@ -139,11 +83,6 @@ def api_get_emails(email_addr: str) -> Any:
     graph_result = graph_service.get_emails_graph(account["client_id"], account["refresh_token"], folder, skip, top, proxy_url)
     if graph_result.get("success"):
         emails = graph_result.get("emails", [])
-        account_summary = compact_summary_service.update_summary_from_message_list(
-            int(account["id"]),
-            emails,
-            folder=folder,
-        )
         # 更新刷新时间
         db = get_db()
         db.execute(
@@ -177,7 +116,6 @@ def api_get_emails(email_addr: str) -> Any:
                 "emails": formatted,
                 "method": "Graph API",
                 "has_more": len(formatted) >= top,
-                "account_summary": account_summary,
             }
         )
     else:
@@ -209,18 +147,12 @@ def api_get_emails(email_addr: str) -> Any:
         IMAP_SERVER_NEW,
     )
     if imap_new_result.get("success"):
-        account_summary = compact_summary_service.update_summary_from_message_list(
-            int(account["id"]),
-            imap_new_result.get("emails", []),
-            folder=folder,
-        )
         return jsonify(
             {
                 "success": True,
                 "emails": imap_new_result.get("emails", []),
                 "method": "IMAP (New)",
                 "has_more": False,  # IMAP 分页暂未完全实现
-                "account_summary": account_summary,
             }
         )
     else:
@@ -237,18 +169,12 @@ def api_get_emails(email_addr: str) -> Any:
         IMAP_SERVER_OLD,
     )
     if imap_old_result.get("success"):
-        account_summary = compact_summary_service.update_summary_from_message_list(
-            int(account["id"]),
-            imap_old_result.get("emails", []),
-            folder=folder,
-        )
         return jsonify(
             {
                 "success": True,
                 "emails": imap_old_result.get("emails", []),
                 "method": "IMAP (Old)",
                 "has_more": False,
-                "account_summary": account_summary,
             }
         )
     else:
@@ -354,15 +280,7 @@ def api_get_email_detail(email_addr: str, message_id: str) -> Any:
             return jsonify({"success": True, "email": detail})
         error_payload = detail_result.get("error") or {}
         _LOGGER.warning("email_detail_imap_failed email=%s message_id=%s", email_addr, message_id)
-        if isinstance(error_payload, dict) and error_payload.get("code"):
-            return _build_response_from_error_payload(error_payload)
-        return build_error_response(
-            "EMAIL_DETAIL_FETCH_FAILED",
-            "获取邮件详情失败",
-            message_en="Failed to fetch email details",
-            status=502,
-            details=f"email={email_addr} message_id={message_id}",
-        )
+        return _build_response_from_error_payload(error_payload)
 
     method = request.args.get("method", "graph")
 
@@ -446,8 +364,6 @@ def api_extract_verification(email_addr: str) -> Any:
 
     # PRD-00005：IMAP 账号验证码提取走 IMAP（Generic）→ 详情 → extractor；Outlook 保持原 Graph→IMAP XOAUTH2 回退链
     account_type = (account.get("account_type") or "outlook").strip().lower()
-    if account.get("_credential_errors") and account_type != "imap":
-        return _build_account_credential_error_response(email_addr, account)
     if account_type == "imap":
         emails_result = get_emails_imap_generic(
             email_addr=email_addr,
@@ -464,14 +380,14 @@ def api_extract_verification(email_addr: str) -> Any:
             error_payload = emails_result.get("error") or {}
             if isinstance(error_payload, dict) and error_payload.get("code"):
                 return _build_response_from_error_payload(error_payload)
-            error_payload = build_error_payload(
+            return build_error_response(
                 "EMAIL_FETCH_FAILED",
                 "获取邮件失败",
-                "IMAPError",
-                500,
-                emails_result,
+                message_en="Failed to fetch email",
+                err_type="IMAPError",
+                status=500,
+                details=emails_result,
             )
-            return jsonify({"success": False, "error": error_payload}), 500
 
         emails = emails_result.get("emails") or []
         if not emails:
@@ -494,6 +410,7 @@ def api_extract_verification(email_addr: str) -> Any:
             folder="inbox",
             provider=account.get("provider", "_default") or "_default",
         )
+
         if not detail_result.get("success"):
             return _build_response_from_error_payload(detail_result.get("error") or {})
         detail = detail_result.get("email") or {}
@@ -508,22 +425,7 @@ def api_extract_verification(email_addr: str) -> Any:
 
         try:
             result = extract_verification_info(email_obj)
-            account_summary = compact_summary_service.update_summary_from_verification(
-                int(account["id"]),
-                message=latest_email,
-                verification_code=str(result.get("verification_code") or ""),
-                folder="inbox",
-            )
-            result.update(
-                {
-                    "email": email_addr,
-                    "subject": latest_email.get("subject", ""),
-                    "from": latest_email.get("from", ""),
-                    "received_at": latest_email.get("date", ""),
-                    "folder": "inbox",
-                }
-            )
-            return jsonify({"success": True, "data": result, "message": "提取成功", "account_summary": account_summary})
+            return jsonify({"success": True, "data": result, "message": "提取成功"})
         except ValueError as e:
             error_payload = build_error_payload(
                 "VERIFICATION_NOT_FOUND",
@@ -559,10 +461,7 @@ def api_extract_verification(email_addr: str) -> Any:
             proxy_url=proxy_url,
         )
         if inbox_result.get("success"):
-            for item in inbox_result.get("emails", []):
-                enriched = dict(item)
-                enriched["folder"] = "inbox"
-                emails.append(enriched)
+            emails.extend(inbox_result.get("emails", []))
             graph_success = True
     except Exception:
         pass
@@ -578,10 +477,7 @@ def api_extract_verification(email_addr: str) -> Any:
             proxy_url=proxy_url,
         )
         if junk_result.get("success"):
-            for item in junk_result.get("emails", []):
-                enriched = dict(item)
-                enriched["folder"] = "junkemail"
-                emails.append(enriched)
+            emails.extend(junk_result.get("emails", []))
             graph_success = True
     except Exception:
         pass
@@ -600,10 +496,7 @@ def api_extract_verification(email_addr: str) -> Any:
                 server=IMAP_SERVER_NEW,
             )
             if imap_new_result.get("success"):
-                for item in imap_new_result.get("emails", []):
-                    enriched = dict(item)
-                    enriched["folder"] = "inbox"
-                    emails.append(enriched)
+                emails.extend(imap_new_result.get("emails", []))
         except Exception:
             pass
 
@@ -619,10 +512,7 @@ def api_extract_verification(email_addr: str) -> Any:
                 server=IMAP_SERVER_OLD,
             )
             if imap_old_result.get("success"):
-                for item in imap_old_result.get("emails", []):
-                    enriched = dict(item)
-                    enriched["folder"] = "inbox"
-                    emails.append(enriched)
+                emails.extend(imap_old_result.get("emails", []))
         except Exception:
             pass
 
@@ -683,29 +573,8 @@ def api_extract_verification(email_addr: str) -> Any:
     try:
         # 尝试从邮件详情提取验证信息
         result = extract_verification_info(email_obj)
-        matched_folder = latest_email.get("folder", "inbox")
-        received_at = latest_email.get("receivedDateTime", "") or latest_email.get("date", "")
-        sender = latest_email.get("from", {})
-        if isinstance(sender, dict):
-            sender = sender.get("emailAddress", {}).get("address", "") or sender.get("address", "") or ""
 
-        account_summary = compact_summary_service.update_summary_from_verification(
-            int(account["id"]),
-            message=latest_email,
-            verification_code=str(result.get("verification_code") or ""),
-            folder=matched_folder,
-        )
-        result.update(
-            {
-                "email": email_addr,
-                "subject": latest_email.get("subject", ""),
-                "from": sender or latest_email.get("from_address", ""),
-                "received_at": received_at,
-                "folder": matched_folder,
-            }
-        )
-
-        return jsonify({"success": True, "data": result, "message": "提取成功", "account_summary": account_summary})
+        return jsonify({"success": True, "data": result, "message": "提取成功"})
 
     except ValueError as e:
         # 未找到验证信息
@@ -775,8 +644,33 @@ def _parse_external_common_args(*, default_since_minutes: int | None = None) -> 
     }
 
 
-def _external_error_response(exc: external_api_service.ExternalApiError):
-    return jsonify(external_api_service.fail(exc.code, exc.message, data=exc.data)), exc.status
+def _resolve_external_error(exc: external_api_service.ExternalApiError, *, allow_nested_upstream: bool = False) -> dict[str, Any]:
+    resolved_code = str(exc.code)
+    resolved_message = str(exc.message)
+    resolved_status = int(exc.status)
+
+    nested_error = exc.data if isinstance(exc.data, dict) else None
+    if allow_nested_upstream and isinstance(exc, external_api_service.UpstreamReadFailedError) and nested_error:
+        nested_code = str(nested_error.get("code") or "").strip().upper()
+        if nested_code in _EXTERNAL_NESTED_UPSTREAM_CODES:
+            resolved_code = nested_code
+            resolved_message = str(nested_error.get("message") or exc.message)
+            try:
+                resolved_status = int(nested_error.get("status") or exc.status)
+            except Exception:
+                resolved_status = int(exc.status)
+
+    return {
+        "code": resolved_code,
+        "message": resolved_message,
+        "status": resolved_status,
+        "data": exc.data,
+    }
+
+
+def _external_error_response(exc: external_api_service.ExternalApiError, *, allow_nested_upstream: bool = False):
+    resolved = _resolve_external_error(exc, allow_nested_upstream=allow_nested_upstream)
+    return jsonify(external_api_service.fail(resolved["code"], resolved["message"], data=resolved["data"])), resolved["status"]
 
 
 @api_key_required
@@ -812,9 +706,9 @@ def api_external_get_messages() -> Any:
             email_addr=(request.args.get("email") or "").strip(),
             endpoint="/api/external/messages",
             status="error",
-            details={"code": _resolve_external_error_code(exc)},
+            details={"code": exc.code},
         )
-        return _resolve_external_error_response(exc)
+        return _external_error_response(exc)
     except Exception as exc:
         external_api_service.audit_external_api_access(
             action="external_api_access",
@@ -852,9 +746,9 @@ def api_external_get_latest_message() -> Any:
             email_addr=(request.args.get("email") or "").strip(),
             endpoint="/api/external/messages/latest",
             status="error",
-            details={"code": _resolve_external_error_code(exc)},
+            details={"code": exc.code},
         )
-        return _resolve_external_error_response(exc)
+        return _external_error_response(exc)
     except Exception as exc:
         external_api_service.audit_external_api_access(
             action="external_api_access",
@@ -885,14 +779,15 @@ def api_external_get_message_detail(message_id: str) -> Any:
         )
         return jsonify(external_api_service.ok(detail))
     except external_api_service.ExternalApiError as exc:
+        resolved = _resolve_external_error(exc, allow_nested_upstream=True)
         external_api_service.audit_external_api_access(
             action="external_api_access",
             email_addr=(request.args.get("email") or "").strip(),
             endpoint="/api/external/messages/{message_id}",
             status="error",
-            details={"code": _resolve_external_error_code(exc)},
+            details={"code": resolved["code"]},
         )
-        return _resolve_external_error_response(exc)
+        return _external_error_response(exc, allow_nested_upstream=True)
     except Exception as exc:
         external_api_service.audit_external_api_access(
             action="external_api_access",
@@ -932,14 +827,15 @@ def api_external_get_message_raw(message_id: str) -> Any:
             )
         )
     except external_api_service.ExternalApiError as exc:
+        resolved = _resolve_external_error(exc, allow_nested_upstream=True)
         external_api_service.audit_external_api_access(
             action="external_api_access",
             email_addr=(request.args.get("email") or "").strip(),
             endpoint="/api/external/messages/{message_id}/raw",
             status="error",
-            details={"code": _resolve_external_error_code(exc)},
+            details={"code": resolved["code"]},
         )
-        return _resolve_external_error_response(exc)
+        return _external_error_response(exc, allow_nested_upstream=True)
     except Exception as exc:
         external_api_service.audit_external_api_access(
             action="external_api_access",

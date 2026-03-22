@@ -13,15 +13,12 @@
                     groups = data.groups;
 
                     // 找到临时邮箱分组
-                    const tempGroup = groups.find(g => isTempMailboxGroup(g));
+                    const tempGroup = groups.find(g => g.name === '临时邮箱');
                     if (tempGroup) {
                         tempEmailGroupId = tempGroup.id;
                     }
 
                     renderGroupList(data.groups);
-                    if (typeof renderCompactGroupStrip === 'function') {
-                        renderCompactGroupStrip(data.groups, currentGroupId);
-                    }
                     updateGroupSelects();
 
                     // 如果之前选中了分组，保持选中状态并刷新邮箱列表
@@ -37,7 +34,7 @@
                         }
                     } else {
                         // 首次进入：自动选中第一个非临时邮箱分组
-                        const firstNormalGroup = groups.find(g => !isTempMailboxGroup(g));
+                        const firstNormalGroup = groups.find(g => g.name !== '临时邮箱');
                         if (firstNormalGroup) {
                             selectGroup(firstNormalGroup.id);
                         }
@@ -54,7 +51,7 @@
             const container = document.getElementById('groupList');
 
             // 过滤掉临时邮箱分组（已有独立页面管理）
-            const filteredGroups = groups.filter(g => !isTempMailboxGroup(g));
+            const filteredGroups = groups.filter(g => g.name !== '临时邮箱');
 
             if (filteredGroups.length === 0) {
                 container.innerHTML = `
@@ -75,7 +72,7 @@
                          data-group-id="${group.id}"
                          onclick="selectGroup(${group.id})">
                         <span class="group-color-dot" style="background-color: ${group.color || '#666'}"></span>
-                        <span class="group-name">${escapeHtml(formatGroupDisplayName(group.name))}</span>
+                        <span class="group-name">${escapeHtml(group.name)}</span>
                         <span class="badge-count">${group.account_count || 0}</span>
                         <div class="group-actions">
                             ${!isSystem ? `<button class="btn-icon" onclick="event.stopPropagation(); editGroup(${group.id})" title="编辑">✏️</button>` : ''}
@@ -113,19 +110,16 @@
 
             // 检查是否是临时邮箱分组
             const group = groups.find(g => g.id === groupId);
-            isTempEmailGroup = !!group && isTempMailboxGroup(group);
+            isTempEmailGroup = group && group.name === '临时邮箱';
 
             // 更新分组列表 UI
             document.querySelectorAll('.group-item').forEach(item => {
                 item.classList.toggle('active', parseInt(item.dataset.groupId) === groupId);
             });
-            if (typeof renderCompactGroupStrip === 'function') {
-                renderCompactGroupStrip(groups, groupId);
-            }
 
             // 更新邮箱面板标题
             if (group) {
-                document.getElementById('currentGroupName').textContent = formatGroupDisplayName(group.name);
+                document.getElementById('currentGroupName').textContent = group.name;
                 document.getElementById('currentGroupColor').style.backgroundColor = group.color || '#666';
 
                 // 更新导入邮箱时的默认分组
@@ -133,6 +127,12 @@
                 if (importSelect) {
                     importSelect.value = groupId;
                 }
+            }
+
+            // 显示「注册Outlook账号」按钮（仅在非临时邮箱分组时）
+            const registerBtn = document.getElementById('registerOutlookBtn');
+            if (registerBtn) {
+                registerBtn.style.display = isTempEmailGroup ? 'none' : '';
             }
 
             // 更新底部按钮
@@ -163,18 +163,12 @@
             // 如果有缓存且不强制刷新，直接使用缓存
             if (!forceRefresh && accountsCache[groupId]) {
                 renderAccountList(accountsCache[groupId]);
-                if (typeof renderCompactAccountList === 'function') {
-                    renderCompactAccountList(accountsCache[groupId]);
-                }
                 return;
             }
 
             // forceRefresh 时不显示 loading（保持旧内容，静默刷新）
             if (!forceRefresh) {
                 container.innerHTML = `<div class="loading-overlay"><span class="spinner"></span> ${translateAppTextLocal('加载中…')}</div>`;
-                if (typeof renderCompactLoadingState === 'function') {
-                    renderCompactLoadingState(translateAppTextLocal('加载中…'));
-                }
             }
 
             try {
@@ -185,9 +179,6 @@
                     // 缓存数据
                     accountsCache[groupId] = data.accounts;
                     renderAccountList(data.accounts);
-                    if (typeof renderCompactAccountList === 'function') {
-                        renderCompactAccountList(data.accounts);
-                    }
                     // 恢复滚动位置
                     if (forceRefresh) {
                         requestAnimationFrame(() => { container.scrollTop = savedScrollTop; });
@@ -195,9 +186,6 @@
                 }
             } catch (error) {
                 container.innerHTML = `<div class="empty-state"><p>${translateAppTextLocal('加载失败')}</p></div>`;
-                if (typeof renderCompactErrorState === 'function') {
-                    renderCompactErrorState(translateAppTextLocal('加载失败'));
-                }
             }
         }
 
@@ -252,25 +240,21 @@
             container.innerHTML = accounts.map((acc, index) => {
                 const isChecked = selectedAccountIds.has(acc.id);
                 const initial = (acc.email || '?')[0].toUpperCase();
-                // Outlook 才展示 token 健康状态；IMAP 账号避免显示“过期/即将过期”这类不适用语义。
-                const supportsTokenRefresh = isRefreshableOutlookAccount(acc);
-                const isFailed = supportsTokenRefresh && acc.last_refresh_status === 'failed';
+                const isFailed = acc.last_refresh_status === 'failed';
                 const gradient = avatarGradients[index % avatarGradients.length];
                 const providerLabel = getProviderLabel(acc.provider || acc.account_type || 'outlook');
                 const providerTagHtml = `<span class="account-provider-tag">${escapeHtml(providerLabel)}</span>`;
-                const defaultMethodLabel = supportsTokenRefresh ? 'Graph' : 'IMAP';
+                const notificationEnabled = acc.notification_enabled !== undefined
+                    ? !!acc.notification_enabled
+                    : !!acc.telegram_push_enabled;
 
-                let tokenBadge = `<span class="badge badge-gray">IMAP</span>`;
-                if (supportsTokenRefresh) {
-                    // Outlook 账号使用后端 token_status 渲染细分状态；未知时回退到“未知”。
-                    tokenBadge = `<span class="badge badge-gray">– ${translateAppTextLocal('未知')}</span>`;
-                    if (acc.token_status === 'valid') {
-                        tokenBadge = `<span class="badge badge-green">✓ ${translateAppTextLocal('有效')}</span>`;
-                    } else if (acc.token_status === 'invalid' || acc.token_status === 'expired') {
-                        tokenBadge = `<span class="badge badge-red">✗ ${translateAppTextLocal('过期')}</span>`;
-                    } else if (acc.token_status === 'expiring') {
-                        tokenBadge = `<span class="badge badge-gold">⚠ ${translateAppTextLocal('即将过期')}</span>`;
-                    }
+                let tokenBadge = `<span class="badge badge-gray">– ${translateAppTextLocal('未知')}</span>`;
+                if (acc.token_status === 'valid') {
+                    tokenBadge = `<span class="badge badge-green">✓ ${translateAppTextLocal('有效')}</span>`;
+                } else if (acc.token_status === 'invalid' || acc.token_status === 'expired') {
+                    tokenBadge = `<span class="badge badge-red">✗ ${translateAppTextLocal('过期')}</span>`;
+                } else if (acc.token_status === 'expiring') {
+                    tokenBadge = `<span class="badge badge-gold">⚠ ${translateAppTextLocal('即将过期')}</span>`;
                 }
 
                 return `
@@ -280,7 +264,7 @@
                     <div class="account-card-top">
                         <input type="checkbox" class="account-select-checkbox" value="${acc.id}"
                                ${isChecked ? 'checked' : ''}
-                               onchange="event.stopPropagation(); handleAccountSelectionChange(${acc.id}, this.checked)">
+                               onclick="event.stopPropagation(); updateBatchActionBar(); updateSelectAllCheckbox()">
                         <div class="account-avatar" style="background: linear-gradient(135deg, ${gradient[0]}, ${gradient[1]})">${initial}</div>
                         <div class="account-info">
                             <div class="account-email"
@@ -293,21 +277,20 @@
                             <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;">
                                 ${providerTagHtml}
                                 ${(acc.tags || []).map(tag => `<span class="tag" style="background-color:${tag.color};color:white;">${escapeHtml(tag.name)}</span>`).join('')}
-                                ${acc.telegram_push_enabled ? `<span class="tag tg-push-tag" onclick="event.stopPropagation(); toggleTelegramPush(${acc.id}, false)" title="${escapeHtml(translateAppTextLocal('点击关闭推送'))}">🔔 ${escapeHtml(translateAppTextLocal('推送'))}</span>` : ''}
+                                ${notificationEnabled ? `<span class="tag tg-push-tag" onclick="event.stopPropagation(); toggleTelegramPush(${acc.id}, false)" title="${escapeHtml(translateAppTextLocal('点击关闭该邮箱通知参与'))}">🔔 ${escapeHtml(translateAppTextLocal('通知'))}</span>` : ''}
                             </div>
                         </div>
                     </div>
                     <div class="account-card-bottom">
                         <div class="account-meta">
-                            <span class="account-api-tag">${acc.method || defaultMethodLabel}</span>
+                            <span class="account-api-tag">${acc.method || 'Graph'}</span>
                             <span>🕐 ${formatRelativeTime(acc.last_refresh_at)}</span>
-                            ${isFailed ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); showRefreshError(${acc.id}, '${escapeJs(acc.last_refresh_error || '未知错误')}', '${escapeJs(acc.email)}', '${escapeJs(acc.account_type || 'outlook')}', '${escapeJs(acc.provider || 'outlook')}')" style="padding:1px 6px;font-size:0.65rem;">${escapeHtml(translateAppTextLocal('查看错误'))}</button>` : ''}
+                            ${isFailed ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); showRefreshError(${acc.id}, '${escapeJs(acc.last_refresh_error || '未知错误')}', '${escapeJs(acc.email)}')" style="padding:1px 6px;font-size:0.65rem;">${escapeHtml(translateAppTextLocal('查看错误'))}</button>` : ''}
                         </div>
                         <div class="account-actions">
-                            <button class="btn-icon ${acc.telegram_push_enabled ? 'tg-push-active' : ''}" onclick="event.stopPropagation(); toggleTelegramPush(${acc.id}, ${!acc.telegram_push_enabled})" title="${escapeHtml(translateAppTextLocal(acc.telegram_push_enabled ? 'Telegram 推送（已开启）' : 'Telegram 推送'))}">🔔</button>
+                            <button class="btn-icon ${notificationEnabled ? 'tg-push-active' : ''}" onclick="event.stopPropagation(); toggleTelegramPush(${acc.id}, ${!notificationEnabled})" title="${escapeHtml(translateAppTextLocal(notificationEnabled ? '该邮箱通知参与（已开启）' : '开启该邮箱通知参与'))}">🔔</button>
                             <button class="btn btn-sm btn-accent" onclick="event.stopPropagation(); copyVerificationInfo('${escapeJs(acc.email)}', this)" title="${escapeHtml(translateAppTextLocal('验证码'))}" style="font-size:0.72rem;padding:2px 8px;">🔑 ${escapeHtml(translateAppTextLocal('验证码'))}</button>
                             <button class="btn-icon" onclick="event.stopPropagation(); copyEmail('${escapeJs(acc.email)}')" title="${escapeHtml(translateAppTextLocal('复制'))}">📋</button>
-                            <button class="btn-icon" onclick="event.stopPropagation(); showAccountRemarkModal(${acc.id}, '${escapeJs(acc.email)}', '${escapeJs(acc.remark || '')}', ${acc.group_id || 'null'})" title="${escapeHtml(translateAppTextLocal('备注'))}">📝</button>
                             <button class="btn-icon" onclick="event.stopPropagation(); showEditAccountModal(${acc.id})" title="${escapeHtml(translateAppTextLocal('编辑'))}">✏️</button>
                             <button class="btn-icon" onclick="event.stopPropagation(); deleteAccount(${acc.id}, '${escapeJs(acc.email)}')" title="${escapeHtml(translateAppTextLocal('删除'))}" style="color:var(--clr-danger);">🗑️</button>
                         </div>
@@ -438,11 +421,11 @@
                     const currentValue = select.value;
                     // 过滤掉临时邮箱分组（导入邮箱时不能选择临时邮箱分组）
                     const filteredGroups = selectId === 'importGroupSelect'
-                        ? groups.filter(g => !isTempMailboxGroup(g))
+                        ? groups.filter(g => g.name !== '临时邮箱')
                         : groups;
 
                     select.innerHTML = filteredGroups.map(g =>
-                        `<option value="${g.id}">${escapeHtml(formatGroupDisplayName(g.name))}</option>`
+                        `<option value="${g.id}">${escapeHtml(g.name)}</option>`
                     ).join('');
                     // 恢复之前的选择
                     if (currentValue && filteredGroups.find(g => g.id === parseInt(currentValue))) {
@@ -583,9 +566,7 @@
 
         // 全选/取消全选账号（当前分组）
         function toggleSelectAll() {
-            const selectAllCheckbox = mailboxViewMode === 'compact'
-                ? document.getElementById('compactSelectAllCheckbox')
-                : document.getElementById('selectAllCheckbox');
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
 
             if (selectAllCheckbox.checked) {
                 selectAllAccounts();
@@ -596,7 +577,7 @@
 
         // 全选当前分组所有账号
         function selectAllAccounts() {
-            const checkboxes = getActiveAccountCheckboxes();
+            const checkboxes = document.querySelectorAll('.account-select-checkbox');
             checkboxes.forEach(cb => {
                 cb.checked = true;
                 selectedAccountIds.add(parseInt(cb.value));
@@ -607,7 +588,7 @@
 
         // 取消全选当前分组
         function unselectAllAccounts() {
-            const checkboxes = getActiveAccountCheckboxes();
+            const checkboxes = document.querySelectorAll('.account-select-checkbox');
             checkboxes.forEach(cb => {
                 cb.checked = false;
                 selectedAccountIds.delete(parseInt(cb.value));
@@ -618,146 +599,37 @@
 
         // 更新全选复选框状态（基于当前分组）
         function updateSelectAllCheckbox() {
-            const checkboxes = getActiveAccountCheckboxes();
-            const checkedCount = checkboxes.filter(cb => cb.checked).length;
-            const selectAllCheckboxes = [
-                document.getElementById('selectAllCheckbox'),
-                document.getElementById('compactSelectAllCheckbox')
-            ].filter(Boolean);
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const checkboxes = document.querySelectorAll('.account-select-checkbox');
+            const checkedCount = document.querySelectorAll('.account-select-checkbox:checked').length;
 
-            selectAllCheckboxes.forEach(selectAllCheckbox => {
-                if (checkboxes.length === 0) {
-                    selectAllCheckbox.checked = false;
-                    selectAllCheckbox.indeterminate = selectedAccountIds.size > 0;
-                } else if (checkedCount === 0) {
-                    selectAllCheckbox.checked = false;
-                    selectAllCheckbox.indeterminate = selectedAccountIds.size > 0;
-                } else if (checkedCount === checkboxes.length) {
-                    selectAllCheckbox.checked = true;
-                    selectAllCheckbox.indeterminate = false;
-                } else {
-                    selectAllCheckbox.checked = false;
-                    selectAllCheckbox.indeterminate = true;
-                }
-            });
+            if (checkboxes.length === 0) {
+                // 当前分组没有账号，但如果其他分组有选中则显示半选
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = selectedAccountIds.size > 0;
+            } else if (checkedCount === 0) {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = selectedAccountIds.size > 0;
+            } else if (checkedCount === checkboxes.length) {
+                selectAllCheckbox.checked = true;
+                selectAllCheckbox.indeterminate = false;
+            } else {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = true;
+            }
         }
 
         // ==================== 验证码复制功能 ====================
 
-        function rerenderAccountCaches() {
-            if (!Array.isArray(accountsCache[currentGroupId])) {
-                return;
-            }
-
-            renderAccountList(applyFiltersAndSort(accountsCache[currentGroupId]));
-            if (typeof renderCompactAccountList === 'function') {
-                renderCompactAccountList(accountsCache[currentGroupId]);
-            }
-            if (typeof renderCompactGroupStrip === 'function') {
-                renderCompactGroupStrip(groups, currentGroupId);
-            }
-            updateSelectAllCheckbox();
-            updateBatchActionBar();
-        }
-
-        function syncAccountSummaryToAccountCache(email, accountSummary) {
-            const normalizedEmail = String(email || '').trim().toLowerCase();
-            if (!normalizedEmail || !accountSummary || typeof accountSummary !== 'object') {
-                return false;
-            }
-
-            let updated = false;
-            Object.values(accountsCache).forEach(accounts => {
-                if (!Array.isArray(accounts)) {
-                    return;
-                }
-
-                accounts.forEach(account => {
-                    if (!account || String(account.email || '').trim().toLowerCase() !== normalizedEmail) {
-                        return;
-                    }
-
-                    account.latest_email_subject = String(accountSummary.latest_email_subject || '');
-                    account.latest_email_from = String(accountSummary.latest_email_from || '');
-                    account.latest_email_folder = String(accountSummary.latest_email_folder || '');
-                    account.latest_email_received_at = String(accountSummary.latest_email_received_at || '');
-                    account.latest_verification_code = String(accountSummary.latest_verification_code || '');
-                    account.latest_verification_folder = String(accountSummary.latest_verification_folder || '');
-                    account.latest_verification_received_at = String(accountSummary.latest_verification_received_at || '');
-                    updated = true;
-                });
-            });
-
-            if (updated) {
-                rerenderAccountCaches();
-            }
-
-            return updated;
-        }
-
-        function syncExtractedVerificationToAccountCache(email, verificationData, accountSummary = null) {
-            if (syncAccountSummaryToAccountCache(email, accountSummary)) {
-                return true;
-            }
-
-            const normalizedEmail = String(email || '').trim().toLowerCase();
-            const verificationCode = String(
-                verificationData?.verification_code || verificationData?.verificationCode || ''
-            ).trim();
-
-            if (!normalizedEmail || !verificationCode) {
-                return false;
-            }
-
-            let updated = false;
-            Object.values(accountsCache).forEach(accounts => {
-                if (!Array.isArray(accounts)) {
-                    return;
-                }
-
-                accounts.forEach(account => {
-                    if (!account || String(account.email || '').trim().toLowerCase() !== normalizedEmail) {
-                        return;
-                    }
-
-                    account.latest_verification_code = verificationCode;
-                    if (verificationData?.folder) {
-                        account.latest_verification_folder = String(verificationData.folder || '');
-                        account.latest_email_folder = String(verificationData.folder || '');
-                    }
-                    if (verificationData?.received_at) {
-                        account.latest_verification_received_at = String(verificationData.received_at || '');
-                        account.latest_email_received_at = String(verificationData.received_at || '');
-                    }
-                    if (verificationData?.subject) {
-                        account.latest_email_subject = String(verificationData.subject || '');
-                    }
-                    if (verificationData?.from) {
-                        account.latest_email_from = String(verificationData.from || '');
-                    }
-                    updated = true;
-                });
-            });
-
-            if (!updated) {
-                return updated;
-            }
-            rerenderAccountCaches();
-
-            return true;
-        }
-
         // 复制验证信息到剪贴板
-        const verificationCopyInFlight = new Set();
+        let copyVerificationInProgress = false; // 防重复点击
 
         async function copyVerificationInfo(email, buttonElement) {
-            const requestKey = String(email || '').trim().toLowerCase();
-
-            // 同一账号仍做幂等保护，不再阻塞其它账号并发提取
-            if (!requestKey || verificationCopyInFlight.has(requestKey)) {
+            // 防止重复点击
+            if (copyVerificationInProgress) {
                 return;
             }
-            verificationCopyInFlight.add(requestKey);
+            copyVerificationInProgress = true;
 
             // 禁用按钮并显示加载状态
             const originalContent = buttonElement.innerHTML;
@@ -772,7 +644,6 @@
 
                 if (data.success && data.data && data.data.formatted) {
                     await copyToClipboard(data.data.formatted);
-                    syncExtractedVerificationToAccountCache(email, data.data, data.account_summary || null);
                     showToast(
                         getUiLanguage() === 'en'
                             ? `Copied: ${data.data.formatted}`
@@ -798,7 +669,7 @@
                 buttonElement.innerHTML = '❌';
                 buttonElement.style.opacity = '1';
             } finally {
-                verificationCopyInFlight.delete(requestKey);
+                copyVerificationInProgress = false;
                 // 延迟恢复按钮状态
                 setTimeout(() => {
                     buttonElement.disabled = false;
@@ -811,41 +682,22 @@
         // 复制文本到剪贴板
         async function copyToClipboard(text) {
             try {
-                if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
                     await navigator.clipboard.writeText(text);
                 } else {
                     // 降级方案：使用 textarea
                     const textarea = document.createElement('textarea');
                     textarea.value = text;
-                    textarea.setAttribute('readonly', 'readonly');
                     textarea.style.position = 'fixed';
-                    textarea.style.top = '-9999px';
                     textarea.style.left = '-9999px';
                     document.body.appendChild(textarea);
-                    textarea.focus();
                     textarea.select();
-                    const copied = document.execCommand('copy');
+                    document.execCommand('copy');
                     document.body.removeChild(textarea);
-                    if (!copied) {
-                        throw new Error('document.execCommand(copy) returned false');
-                    }
                 }
             } catch (error) {
                 console.error('复制失败:', error);
                 throw error;
             }
         }
-
-        window.addEventListener('ui-language-changed', () => {
-            if (Array.isArray(groups) && groups.length > 0) {
-                renderGroupList(groups);
-                updateGroupSelects();
-            }
-
-            const currentGroup = Array.isArray(groups) ? groups.find(group => group.id === currentGroupId) : null;
-            const currentGroupName = document.getElementById('currentGroupName');
-            if (currentGroup && currentGroupName) {
-                currentGroupName.textContent = formatGroupDisplayName(currentGroup.name);
-            }
-        });
 

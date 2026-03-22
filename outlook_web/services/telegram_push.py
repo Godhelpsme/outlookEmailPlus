@@ -163,6 +163,13 @@ def _deduplicate_emails_for_source(account: dict, emails: List[dict]) -> List[di
     return deduped
 
 
+def _should_fetch_account_via_graph(account: dict) -> bool:
+    account_type = str(account.get("account_type") or "").strip().lower()
+    if account_type:
+        return account_type == "outlook"
+    return str(account.get("provider") or "").strip().lower() == "outlook"
+
+
 def _fetch_new_emails_imap(account: dict, since: str, folder: str = "inbox") -> List[dict]:
     """通过 IMAP 获取 received_at > since 的邮件，最多返回 50 封。
 
@@ -188,7 +195,16 @@ def _fetch_new_emails_imap(account: dict, since: str, folder: str = "inbox") -> 
     conn = None
     try:
         conn = imaplib.IMAP4_SSL(host, port, timeout=15)
-        conn.login(user, password)
+        try:
+            conn.login(user, password)
+        except imaplib.IMAP4.error as exc:
+            raw_message = str(exc or "")
+            lowered = raw_message.lower()
+            if (account.get("provider") or "").strip().lower() == "outlook" and "basicauthblocked" in lowered:
+                raise RuntimeError(
+                    "Outlook.com 已阻止 Basic Auth（账号密码直连）；请将该账号改为 Outlook OAuth 导入"
+                ) from exc
+            raise
         selected = False
         last_select_error = None
         for folder_name in _resolve_imap_folder(account, folder):

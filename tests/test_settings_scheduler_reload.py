@@ -47,12 +47,14 @@ class SettingsSchedulerReloadTests(unittest.TestCase):
         self.assertIs(args[0], fake_scheduler)
         self.assertIs(args[1], self.app)
 
-    def test_configure_scheduler_jobs_registers_unified_notification_dispatch_job(self):
+    def test_configure_scheduler_jobs_uses_unified_notification_dispatch_job(self):
         fake_scheduler = MagicMock(name="scheduler")
 
         with patch("outlook_web.services.scheduler._configure_telegram_push_job") as configure_telegram, patch(
             "outlook_web.services.scheduler._configure_email_notification_job"
-        ) as configure_email, patch("outlook_web.services.scheduler._configure_probe_poll_job"), patch(
+        ) as configure_email, patch(
+            "outlook_web.services.scheduler._configure_probe_poll_job"
+        ), patch(
             "outlook_web.services.scheduler._configure_pool_maintenance_jobs"
         ):
             from outlook_web.services import scheduler as scheduler_service

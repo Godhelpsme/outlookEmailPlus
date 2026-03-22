@@ -106,20 +106,11 @@ def _get_notification_dispatch_interval(app) -> int:
 
 
 def _configure_telegram_push_job(scheduler, app) -> None:
-    """注册/更新 Telegram 推送 Job。
-
-    新邮件自动通知默认复用按账号开关的 Telegram 推送链路：
-    - 只有开启了账号级通知的邮箱才会被轮询
-    - 不再通过全局“邮件通知”配置扫描全部邮箱
-    """
+    """注册/更新旧版 Telegram 推送 Job。"""
     from outlook_web.services.telegram_push import run_telegram_push_job
 
     try:
         scheduler.remove_job("telegram_push_job")
-    except Exception:
-        pass
-    try:
-        scheduler.remove_job("email_notification_job")
     except Exception:
         pass
 
@@ -145,10 +136,6 @@ def _configure_email_notification_job(scheduler, app) -> None:
 
     try:
         scheduler.remove_job("email_notification_job")
-    except Exception:
-        pass
-    try:
-        scheduler.remove_job("telegram_push_job")
     except Exception:
         pass
 

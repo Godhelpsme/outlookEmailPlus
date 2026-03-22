@@ -64,12 +64,15 @@
                 </div>
             `;
             document.getElementById('emailDetailToolbar').style.display = 'none';
+
+            if (typeof syncPollingForCurrentAccount === 'function') {
+                syncPollingForCurrentAccount({ restart: true });
+            }
         }
 
         // Provider 下拉缓存
         let providersLoaded = false;
         let providerOptions = [];
-        let remarkEditContext = { accountId: null, email: '', groupId: null };
 
         function buildImportFailureToastMessage(data) {
             const baseMessage = pickApiMessage(data, data.message || '导入失败', data.message_en || 'Import failed');
@@ -233,42 +236,6 @@
             document.getElementById('addAccountModal').classList.remove('show');
         }
 
-        function resolveImportGroupId(rawGroupId) {
-            return Number.isInteger(rawGroupId) && rawGroupId > 0 ? rawGroupId : null;
-        }
-
-        async function refreshMailboxAfterImport(provider, importedGroupId) {
-            await loadGroups();
-
-            if (currentPage !== 'mailbox') {
-                return;
-            }
-
-            if (provider === 'auto') {
-                if (!currentGroupId) {
-                    const firstNormalGroup = groups.find(group => group.name !== '临时邮箱');
-                    if (firstNormalGroup) {
-                        await selectGroup(firstNormalGroup.id);
-                    }
-                }
-                return;
-            }
-
-            if (!importedGroupId) {
-                if (currentGroupId) {
-                    await loadAccountsByGroup(currentGroupId, true);
-                }
-                return;
-            }
-
-            if (currentGroupId === importedGroupId) {
-                await loadAccountsByGroup(importedGroupId, true);
-                return;
-            }
-
-            await selectGroup(importedGroupId);
-        }
-
         // 添加账号
         async function addAccount() {
             const input = document.getElementById('accountInput').value.trim();
@@ -276,7 +243,6 @@
             const providerEl = document.getElementById('accountProvider');
             const provider = providerEl ? (providerEl.value || 'outlook') : 'outlook';
             const addToPool = Boolean(document.getElementById('addToPoolCheckbox')?.checked);
-            const importedGroupId = resolveImportGroupId(groupId);
 
             if (!input) {
                 showToast(translateAppTextLocal('请输入账号信息'), 'error');
@@ -356,12 +322,18 @@
                         if (provider === 'auto') {
                             // auto 模式可能影响多个分组，清除所有缓存
                             for (const key in accountsCache) { delete accountsCache[key]; }
-                        } else if (importedGroupId) {
-                            delete accountsCache[importedGroupId];
+                        } else {
+                            delete accountsCache[groupId];
                         }
                     }
 
-                    await refreshMailboxAfterImport(provider, importedGroupId);
+                    // 刷新分组列表（更新数量）
+                    loadGroups();
+
+                    // 如果当前选中的就是这个分组，刷新邮箱列表
+                    if (currentGroupId && currentGroupId === groupId) {
+                        loadAccountsByGroup(groupId, true);
+                    }
                 } else if (data.summary || Array.isArray(data.errors)) {
                     showToast(buildImportFailureToastMessage(data), 'error', data.error || data);
                 } else {
@@ -392,7 +364,6 @@
                     clientIdInput.dataset.originalValue = acc.client_id || '';
                     refreshTokenInput.value = acc.refresh_token;
                     document.getElementById('editGroupSelect').value = acc.group_id || 1;
-                    document.getElementById('editRemarkValue').value = acc.remark || '';
                     document.getElementById('editRemark').value = acc.remark || '';
                     document.getElementById('editStatus').value = acc.status || 'active';
 
@@ -427,72 +398,6 @@
             document.getElementById('editAccountModal').classList.remove('show');
         }
 
-        function showAccountRemarkModal(accountId, email, remark = '', groupId = null) {
-            remarkEditContext = {
-                accountId,
-                email: email || '',
-                groupId: groupId || currentGroupId
-            };
-            document.getElementById('remarkAccountId').value = accountId || '';
-            document.getElementById('remarkAccountEmail').value = email || '';
-            document.getElementById('remarkInput').value = remark || '';
-            document.getElementById('accountRemarkModal').classList.add('show');
-        }
-
-        function hideAccountRemarkModal() {
-            document.getElementById('accountRemarkModal').classList.remove('show');
-            remarkEditContext = { accountId: null, email: '', groupId: null };
-        }
-
-        function openRemarkEditorFromEditModal() {
-            const accountId = parseInt(document.getElementById('editAccountId').value || '0', 10);
-            const email = document.getElementById('editEmail').value || '';
-            const remark = document.getElementById('editRemark').value || '';
-            const groupId = parseInt(document.getElementById('editGroupSelect').value || currentGroupId || '0', 10);
-            showAccountRemarkModal(accountId, email, remark, groupId);
-        }
-
-        async function saveAccountRemark() {
-            const accountId = parseInt(document.getElementById('remarkAccountId').value || '0', 10);
-            const remark = document.getElementById('remarkInput').value;
-            if (!accountId) {
-                showToast(translateAppTextLocal('账号不存在'), 'error');
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/accounts/${accountId}/remark`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ remark })
-                });
-                const data = await response.json();
-
-                if (!data.success) {
-                    handleApiError(data, '备注更新失败');
-                    return;
-                }
-
-                showToast(pickApiMessage(data, data.message, 'Remark updated successfully'), 'success');
-
-                const editAccountId = parseInt(document.getElementById('editAccountId')?.value || '0', 10);
-                if (editAccountId === accountId) {
-                    document.getElementById('editRemarkValue').value = remark;
-                    document.getElementById('editRemark').value = remark;
-                }
-
-                const targetGroupId = remarkEditContext.groupId || currentGroupId;
-                hideAccountRemarkModal();
-
-                if (targetGroupId) {
-                    delete accountsCache[targetGroupId];
-                    await loadAccountsByGroup(targetGroupId, true);
-                }
-            } catch (error) {
-                showToast(translateAppTextLocal('备注更新失败'), 'error');
-            }
-        }
-
         // 更新账号
         async function updateAccount() {
             const accountId = document.getElementById('editAccountId').value;
@@ -523,7 +428,7 @@
                 return;
             }
 
-            // 仅在用户实际修改 Outlook 凭据时，才要求提交完整凭据对
+            // 仅在用户真正修改 Outlook 凭据时，才要求提交完整凭据对
             if (wantsToUpdateOutlookCredentials && (!data.client_id || !data.refresh_token)) {
                 showToast(translateAppTextLocal('邮箱、Client ID 和 Refresh Token 不能为空'), 'error');
                 return;
@@ -692,7 +597,7 @@
             }
         }
 
-        // 切换 Telegram 推送开关
+        // 切换账号通知参与开关（沿用旧 Telegram 接口）
         async function toggleTelegramPush(accountId, enabled) {
             try {
                 const response = await fetch(`/api/accounts/${accountId}/telegram-toggle`, {
@@ -705,8 +610,8 @@
                     showToast(
                         pickApiMessage(
                             data,
-                            data.message || (enabled ? 'Telegram推送已开启' : 'Telegram推送已关闭'),
-                            enabled ? 'Telegram notification enabled' : 'Telegram notification disabled'
+                            data.message || (enabled ? '该邮箱通知参与已开启' : '该邮箱通知参与已关闭'),
+                            enabled ? 'Mailbox notifications enabled' : 'Mailbox notifications disabled'
                         ),
                         'success'
                     );
@@ -715,7 +620,7 @@
                         loadAccountsByGroup(currentGroupId, true);
                     }
                 } else {
-                    handleApiError(data, 'Telegram推送切换失败');
+                    handleApiError(data, '通知参与切换失败');
                 }
             } catch (error) {
                 showToast(translateAppTextLocal('操作失败'), 'error');

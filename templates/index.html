@@ -144,14 +144,7 @@
 
             <!-- ===== Page: Mailbox (3-column) ===== -->
             <div class="page page-hidden page-no-padding" id="page-mailbox">
-                <template id="mailboxViewModeSwitcherTemplate">
-                    <div id="mailboxViewModeSwitcher" class="mailbox-view-switcher mode-switch">
-                        <button class="mode-pill active" id="mailboxStandardModeBtn" onclick="switchMailboxViewMode('standard')">标准模式</button>
-                        <button class="mode-pill" id="mailboxCompactModeBtn" onclick="switchMailboxViewMode('compact')">简洁模式</button>
-                    </div>
-                </template>
-
-                <div class="mailbox-layout" id="mailboxStandardLayout">
+                <div class="mailbox-layout">
                     <!-- Groups Column -->
                     <div class="groups-column" id="groupPanel">
                         <div class="column-header">
@@ -177,6 +170,7 @@
                                 <span id="currentGroupName">选择分组</span>
                             </span>
                             <div style="display:flex;gap:4px;align-items:center;">
+                                <button id="registerOutlookBtn" class="btn btn-sm" onclick="showGetRefreshTokenModal()" title="通过 OAuth 获取 Token 注册 Outlook 账号" style="display:none;background-color:#0078d4;color:#fff;font-size:0.75rem;padding:3px 8px;border:none;border-radius:4px;cursor:pointer;">🔑 注册</button>
                                 <button class="btn-icon" onclick="showTagManagementModal()" title="管理标签">🏷️</button>
                                 <button class="btn-icon" onclick="showAddAccountModal()" title="导入账号">+</button>
                             </div>
@@ -265,55 +259,6 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div id="mailboxCompactLayout" class="mailbox-compact-layout">
-                    <div class="preview-shell">
-                        <section class="compact-board">
-                            <div class="board-toolbar">
-                                <div class="toolbar-left">
-                                    <span id="compactModeSummary" class="toolbar-meta compact-mode-summary">请选择分组</span>
-                                </div>
-                                <div class="toolbar-right">
-                                    <button class="btn-inline ghost" onclick="showTagManagementModal()">管理标签</button>
-                                    <details class="action-menu">
-                                        <summary class="btn-inline ghost" aria-label="账号操作" title="账号操作">账号操作</summary>
-                                        <div class="menu-panel">
-                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showAddAccountModal()">添加账号</button>
-                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showExportModal()">导出账号</button>
-                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showRefreshModal()">全量刷新 Token</button>
-                                        </div>
-                                    </details>
-                                </div>
-                            </div>
-
-                            <div id="compactGroupStrip" class="group-strip"></div>
-
-                            <div class="mail-list-wrap">
-                                <div class="mail-head">
-                                    <div class="compact-header-cell compact-header-cell-selection">
-                                        <input type="checkbox" id="compactSelectAllCheckbox" onclick="toggleSelectAll()">
-                                    </div>
-                                    <div class="compact-header-cell">邮箱</div>
-                                    <div class="compact-header-cell">验证码</div>
-                                    <div class="compact-header-cell">最新邮件</div>
-                                    <div class="compact-header-cell">标签</div>
-                                    <div class="compact-header-cell compact-header-cell-actions">操作</div>
-                                </div>
-                                <div id="compactAccountList" class="mail-rows"></div>
-                            </div>
-
-                            <div id="compactBatchActionBar" class="batch-bar" style="display:none;">
-                                <span id="compactSelectedCount" class="batch-info">已选 0 项</span>
-                                <div class="batch-actions">
-                                    <button class="btn-inline ghost" onclick="showBatchTagModal('add')">打标签</button>
-                                    <button class="btn-inline ghost" onclick="showBatchTagModal('remove')">去标签</button>
-                                    <button class="btn-inline" onclick="showBatchMoveGroupModal()">移动分组</button>
-                                    <button class="btn-inline primary" onclick="showBatchDeleteConfirm()">删除</button>
-                                </div>
-                            </div>
-                        </section>
                     </div>
                 </div>
             </div>
@@ -526,27 +471,27 @@
                             <div class="form-group">
                                 <label class="form-label">轮询次数 <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（最多轮询多少次后停止）</span></label>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="number" class="form-input" id="pollingCount" min="1" max="100" value="5" placeholder="5" style="max-width: 120px;">
+                                    <input type="number" class="form-input" id="pollingCount" min="0" max="100" value="5" placeholder="5" style="max-width: 120px;">
                                     <span style="font-size: 0.88rem; color: var(--text-muted); font-weight: 500;">次</span>
                                 </div>
-                                <div class="form-hint">范围：1-100 次，设置为 0 表示持续轮询</div>
+                                <div class="form-hint">范围：0-100 次，设置为 0 表示持续轮询</div>
                             </div>
                         </div>
 
                         <!-- 邮件通知设置 -->
                         <div style="border-top: 1px solid var(--border-light); margin: 1.5rem 0; padding-top: 1.5rem;">
-                            <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem; color: var(--text);">✉️ 邮件通知</h4>
+                            <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem; color: var(--text);">✉️ Email 通知</h4>
                             <div class="form-group">
                                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                     <input type="checkbox" id="emailNotificationEnabled">
-                                    <span class="form-label" style="margin: 0;">启用邮件通知</span>
+                                    <span class="form-label" style="margin: 0;">启用 Email 通知</span>
                                 </label>
-                                <div class="form-hint">全局生效，覆盖普通邮箱和临时邮箱；仅从启用后新到达的邮件开始通知。</div>
+                                <div class="form-hint">这里只配置 Email 通知通道。普通邮箱需在账号列表开启通知后才会通过 Email 发送；临时邮箱按当前通知规则处理。启用后仅从新到达的邮件开始通知。</div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">接收通知邮箱</label>
                                 <input type="email" class="form-input" id="emailNotificationRecipient" placeholder="输入接收通知的邮箱地址">
-                                <div class="form-hint">只需填写接收邮箱，不暴露复杂邮件网关配置。关闭通知后可保留该邮箱。</div>
+                                <div class="form-hint">这里只配置 Email 渠道的接收邮箱，不会让所有普通邮箱自动发送。</div>
                             </div>
                             <div class="form-group" style="margin-top: 0.5rem;">
                                 <button class="btn btn-outline" onclick="testEmailNotification()" id="btnTestEmailNotification" style="font-size: 0.85rem;">📨 发送测试邮件</button>
@@ -556,10 +501,11 @@
 
                         <!-- Telegram 推送设置 -->
                         <div style="border-top: 1px solid var(--border-light); margin: 1.5rem 0; padding-top: 1.5rem;">
-                            <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem; color: var(--text);">📬 Telegram 推送</h4>
+                            <h4 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem; color: var(--text);">📬 Telegram 通知</h4>
                             <div class="form-group">
                                 <label class="form-label">Bot Token <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（从 @BotFather 获取）</span></label>
                                 <input type="password" class="form-input" id="telegramBotToken" placeholder="输入 Bot Token" autocomplete="off">
+                                <div class="form-hint">这里只配置 Telegram 通知通道。普通邮箱需在账号列表开启通知后才会通过 Telegram 发送；临时邮箱按当前通知规则处理。</div>
                                 <div class="form-hint">格式：1234567890:AAxxxxxx（留空则禁用推送）</div>
                             </div>
                             <div class="form-group">
@@ -570,15 +516,14 @@
                             <div class="form-group">
                                 <label class="form-label">轮询间隔 <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（检查新邮件的时间间隔）</span></label>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <!-- legacy-contract: id="telegramPollInterval" min="60" max="3600" -->
                                     <input type="number" class="form-input" id="telegramPollInterval" min="10" max="86400" value="600" placeholder="600" style="max-width: 120px;">
                                     <span style="font-size: 0.88rem; color: var(--text-muted); font-weight: 500;">秒</span>
                                 </div>
-                                <div class="form-hint">范围：60-3600 秒，默认 600 秒（10 分钟）</div>
+                                <div class="form-hint">范围：10-86400 秒，默认 600 秒（10 分钟）</div>
                             </div>
                             <div class="form-group" style="margin-top: 0.5rem;">
                                 <button class="btn btn-outline" onclick="testTelegramPush()" id="btnTestTelegram" style="font-size: 0.85rem;">📨 发送测试消息</button>
-                                <div class="form-hint">验证 Bot Token 和 Chat ID 是否配置正确</div>
+                                <div class="form-hint">验证当前 Telegram 通知通道是否配置正确</div>
                             </div>
                         </div>
 
