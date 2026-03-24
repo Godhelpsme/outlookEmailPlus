@@ -87,8 +87,8 @@ web_outlook_app.py    兼容入口
 ### Docker 部署
 
 ```bash
-docker pull ghcr.io/zeropointsix/outlook-email-plus:v1.9.2
-docker pull ghcr.io/zeropointsix/outlook-email-plus:latest
+docker pull guangshanshui/outlook-email-plus:v1.9.2
+docker pull guangshanshui/outlook-email-plus:latest
 
 docker run -d \
   --name outlook-email-plus \
@@ -97,7 +97,7 @@ docker run -d \
   -e SECRET_KEY=your-secret-key-here \
   -e LOGIN_PASSWORD=your-login-password \
   -e ALLOW_LOGIN_PASSWORD_CHANGE=false \
-  ghcr.io/zeropointsix/outlook-email-plus:v1.9.2
+  guangshanshui/outlook-email-plus:v1.9.2
 ```
 
 说明：
