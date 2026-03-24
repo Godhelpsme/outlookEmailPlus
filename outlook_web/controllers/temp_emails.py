@@ -11,11 +11,33 @@ from outlook_web.errors import build_error_response
 from outlook_web.repositories import temp_emails as temp_emails_repo
 from outlook_web.security.auth import login_required
 from outlook_web.services import gptmail
+from outlook_web.services.temp_email_content import (
+    build_inline_resource_map,
+    load_temp_email_payload,
+    rewrite_html_with_inline_resources,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== 临时邮箱 API ====================
+
+
+def _should_refresh_temp_email_detail(msg: dict[str, Any] | None) -> bool:
+    if not msg:
+        return True
+
+    content = str(msg.get("content") or "").strip()
+    html_content = str(msg.get("html_content") or "").strip()
+    if not content and not html_content:
+        return True
+
+    raw_payload = load_temp_email_payload(msg.get("raw_content"))
+    inline_resources = build_inline_resource_map(raw_payload)
+    if "cid:" in html_content.lower() and not inline_resources:
+        return True
+
+    return False
 
 
 @login_required
@@ -126,13 +148,21 @@ def api_get_temp_email_message_detail(email_addr: str, message_id: str) -> Any:
     """获取临时邮件详情"""
     msg = temp_emails_repo.get_temp_email_message_by_id(message_id)
 
-    if not msg:
+    if _should_refresh_temp_email_detail(msg):
         api_msg = gptmail.get_temp_email_detail_from_api(message_id)
         if api_msg:
             temp_emails_repo.save_temp_email_messages(email_addr, [api_msg])
-            msg = temp_emails_repo.get_temp_email_message_by_id(message_id)
+            msg = temp_emails_repo.get_temp_email_message_by_id(message_id) or msg
 
     if msg:
+        has_html = bool(msg.get("has_html") or msg.get("html_content"))
+        body = msg.get("html_content") if has_html else msg.get("content", "")
+        raw_payload = load_temp_email_payload(msg.get("raw_content"))
+        inline_resources = build_inline_resource_map(raw_payload)
+
+        if has_html and inline_resources:
+            body = rewrite_html_with_inline_resources(body or "", inline_resources)
+
         return jsonify(
             {
                 "success": True,
@@ -141,10 +171,11 @@ def api_get_temp_email_message_detail(email_addr: str, message_id: str) -> Any:
                     "from": msg.get("from_address", "未知"),
                     "to": email_addr,
                     "subject": msg.get("subject", "无主题"),
-                    "body": (msg.get("html_content") if msg.get("has_html") else msg.get("content", "")),
-                    "body_type": "html" if msg.get("has_html") else "text",
+                    "body": body,
+                    "body_type": "html" if has_html else "text",
                     "date": msg.get("created_at", ""),
                     "timestamp": msg.get("timestamp", 0),
+                    "inline_resources": inline_resources,
                 },
             }
         )

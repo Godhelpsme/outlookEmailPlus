@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -226,6 +227,13 @@ def send_business_email_notification(source: dict[str, Any], message: dict[str, 
         body_text = body_text[:MAX_EMAIL_BODY_LENGTH].rstrip() + "\n\n...[truncated]"
     if not body_text:
         body_text = "(正文为空)"
+
+    safe_source_label = html.escape(str(source.get("label") or ""), quote=True)
+    safe_folder = html.escape(str(folder or ""), quote=True)
+    safe_sender = html.escape(str(message.get("sender") or "-"), quote=True)
+    safe_subject = html.escape(str(message.get("subject") or "无主题"), quote=True)
+    safe_received_at = html.escape(str(received_at or "-"), quote=True)
+    safe_body_text = html.escape(str(body_text), quote=True).replace("\n", "<br>")
     text_body = (
         f"邮箱来源: {source['label']}\n"
         f"来源类型: {'普通邮箱' if source['source_type'] == SOURCE_ACCOUNT else '临时邮箱'}\n"
@@ -236,13 +244,13 @@ def send_business_email_notification(source: dict[str, Any], message: dict[str, 
         f"正文:\n{body_text}"
     )
     html_body = (
-        f"<p><strong>邮箱来源:</strong> {source['label']}</p>"
+        f"<p><strong>邮箱来源:</strong> {safe_source_label}</p>"
         f"<p><strong>来源类型:</strong> {'普通邮箱' if source['source_type'] == SOURCE_ACCOUNT else '临时邮箱'}</p>"
-        f"<p><strong>目录:</strong> {folder}</p>"
-        f"<p><strong>发件人:</strong> {message.get('sender') or '-'}</p>"
-        f"<p><strong>主题:</strong> {message.get('subject') or '无主题'}</p>"
-        f"<p><strong>时间:</strong> {received_at}</p>"
-        f"<p><strong>正文:</strong><br>{body_text.replace(chr(10), '<br>')}</p>"
+        f"<p><strong>目录:</strong> {safe_folder}</p>"
+        f"<p><strong>发件人:</strong> {safe_sender}</p>"
+        f"<p><strong>主题:</strong> {safe_subject}</p>"
+        f"<p><strong>时间:</strong> {safe_received_at}</p>"
+        f"<p><strong>正文:</strong><br>{safe_body_text}</p>"
     )
     email_push.send_email_message(
         recipient=recipient,
@@ -428,20 +436,6 @@ def _is_email_channel_enabled() -> bool:
     return enabled and email_push.is_email_notification_ready()
 
 
-def _is_source_notification_enabled(source: dict[str, Any]) -> bool:
-    """账号级通知开关。
-
-    Resolve 文档约定：
-    - 普通邮箱是否参与自动通知，由账号级开关决定
-    - 临时邮箱本轮继续沿用默认参与的兼容语义
-    """
-    if source.get("source_type") != SOURCE_ACCOUNT:
-        return True
-
-    account = source.get("account") or {}
-    return bool(account.get("telegram_push_enabled"))
-
-
 def _build_active_channels_for_source(
     source: dict[str, Any],
     *,
@@ -450,18 +444,11 @@ def _build_active_channels_for_source(
 ) -> list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], None], int]]:
     active_channels: list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], None], int]] = []
 
-    # 先判断“这个源能否参与自动通知”，再判断“参与哪些渠道”。
-    # 当前版本复用了 accounts.telegram_push_enabled 作为账号级总开关：
-    # - 关闭时：该账号不会进入任何自动通知渠道（包括邮件）
-    # - 开启时：再按各渠道运行时配置决定是否真正发送
-    # 临时邮箱保持历史兼容语义，不受账号级开关约束。
-    if not _is_source_notification_enabled(source):
-        return active_channels
-
     if email_enabled:
         active_channels.append((CHANNEL_EMAIL, send_business_email_notification, MAX_EMAIL_NOTIFICATIONS_PER_JOB))
 
-    if telegram_runtime and source["source_type"] == SOURCE_ACCOUNT:
+    account = source.get("account") or {}
+    if telegram_runtime and source["source_type"] == SOURCE_ACCOUNT and bool(account.get("telegram_push_enabled")):
         active_channels.append(
             (
                 CHANNEL_TELEGRAM,
@@ -561,14 +548,9 @@ def run_email_notification_job(app) -> None:
         enabled = settings_repo.get_setting("email_notification_enabled", "false").lower() == "true"
         if not enabled or not email_push.is_email_notification_ready():
             return
-        # 兼容旧入口：虽然函数名保留为 email_notification_job，
-        # 但这里已经与统一通知分发共享“源是否允许通知”的过滤规则。
-        sources = [source for source in list_email_notification_sources() if _is_source_notification_enabled(source)]
-        if not sources:
-            return
         process_channel_for_sources(
             channel=CHANNEL_EMAIL,
-            sources=sources,
+            sources=list_email_notification_sources(),
             sender=send_business_email_notification,
             max_notifications=MAX_EMAIL_NOTIFICATIONS_PER_JOB,
         )

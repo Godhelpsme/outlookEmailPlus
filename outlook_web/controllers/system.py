@@ -20,9 +20,7 @@ from outlook_web.repositories import settings as settings_repo
 from outlook_web.security.auth import api_key_required, login_required
 from outlook_web.security.external_api_guard import external_api_guards
 from outlook_web.services import external_api as external_api_service
-
-# 常量
-REFRESH_LOCK_NAME = "token_refresh"
+from outlook_web.services.scheduler import REFRESH_LOCK_NAME
 
 
 def utcnow() -> datetime:
@@ -274,7 +272,7 @@ def api_external_health() -> Any:
         }
         if db_ok:
             try:
-                probe_summary = external_api_service.get_upstream_probe_summary("instance", "__instance__")
+                probe_summary = external_api_service.probe_instance_upstream(cache_ttl_seconds=60)
             except Exception:
                 probe_summary = {
                     "upstream_probe_ok": False,
@@ -394,12 +392,7 @@ def api_external_account_status() -> Any:
     provider = (account.get("provider") or account_type or "outlook").strip().lower()
     preferred_method = "imap_generic" if account_type == "imap" else "graph"
     status = (account.get("status") or "active").strip().lower()
-    can_read = status != "disabled"
-    if can_read:
-        if account_type == "imap":
-            can_read = bool((account.get("imap_host") or "").strip()) and bool((account.get("imap_password") or "").strip())
-        else:
-            can_read = bool((account.get("client_id") or "").strip()) and bool((account.get("refresh_token") or "").strip())
+    can_read = external_api_service.can_account_read(account)
 
     data = {
         "email": email_addr,

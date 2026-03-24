@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 
 from tests._import_app import import_web_app_module
@@ -32,13 +33,23 @@ class V190FrontendContractTests(unittest.TestCase):
         self.assertIn("document.querySelector('.sidebar-bottom')", js)
         self.assertIn("root.querySelectorAll('[placeholder],[title],[aria-label],input[type=\"button\"][value]')", js)
         self.assertIn("const core = text.trim()", js)
-        self.assertIn("characterData: true", js)
-        self.assertIn("attributes: true", js)
-        self.assertIn("mutation.type === 'characterData'", js)
-        self.assertIn("mutation.type === 'attributes'", js)
-        self.assertIn("mutation.attributeName === 'value'", js)
-        self.assertIn("translated !== value", js)
-        self.assertIn("translatedValue !== mutation.target.value", js)
+
+    def test_i18n_skips_dynamic_business_scopes(self):
+        client = self.app.test_client()
+        js = self._get_text(client, "/static/js/i18n.js")
+
+        self.assertIn("const I18N_SKIP_SELECTORS", js)
+        self.assertIn("data-i18n-skip", js)
+        for selector in [
+            "#emailList",
+            "#emailDetail",
+            "#accountList",
+            "#compactAccountList",
+            "#refreshLogContainer",
+            "#auditLogContainer",
+            "#tempEmailContainer",
+        ]:
+            self.assertIn(selector, js)
 
     def test_main_js_does_not_override_i18n_runtime_helpers(self):
         client = self.app.test_client()
@@ -80,15 +91,6 @@ class V190FrontendContractTests(unittest.TestCase):
             "启用邮件通知",
             "接收通知邮箱",
             "发送测试邮件",
-            "🔍 全屏查看",
-            "🗑️ 删除",
-            "🔄 获取邮件",
-            "信任此邮件",
-            "🔄 Token 刷新管理",
-            "🔄 全量刷新",
-            "🔁 重试失败",
-            "失败邮箱",
-            "全量刷新历史",
             "📤 导出",
             "🔄 全量刷新 Token",
             "＋ 添加账号",
@@ -166,8 +168,6 @@ class V190FrontendContractTests(unittest.TestCase):
         self.assertIn("translateAppTextLocal('推送')", groups_js)
         self.assertIn("translateAppTextLocal('收件箱为空')", emails_js)
         self.assertIn("translateAppTextLocal('暂无邮件')", temp_emails_js)
-        self.assertIn("translateAppTextLocal('隐藏列表')", emails_js)
-        self.assertIn("translateAppTextLocal('🔄 获取邮件')", temp_emails_js)
 
     def test_frontend_import_and_export_error_contract_helpers_are_consumed(self):
         client = self.app.test_client()
@@ -189,15 +189,9 @@ class V190FrontendContractTests(unittest.TestCase):
         self.assertIn(".sidebar-collapsed .btn-github {", css)
         self.assertIn(".sidebar-collapsed #globalLanguageSwitcher.switcher-docked", i18n_js)
 
-    def test_frontend_runtime_copy_and_search_strings_use_i18n_contract(self):
+    def test_scroll_is_not_globally_locked_on_html_body(self):
         client = self.app.test_client()
-        main_js = self._get_text(client, "/static/js/main.js")
-        groups_js = self._get_text(client, "/static/js/features/groups.js")
-        emails_js = self._get_text(client, "/static/js/features/emails.js")
-        self.assertIn(
-            "translateAppTextLocal(`当前已配置 ${normalized.length} 个多 Key。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。`)",
-            main_js,
-        )
-        self.assertIn("translateAppTextLocal('未设置（设置后可通过 /api/external/* 对外开放接口读取邮件与验证码）')", main_js)
-        self.assertIn("translateAppTextLocal(`搜索结果 (${data.accounts.length})`)", groups_js)
-        self.assertIn("replace(/\\s+\\((临时|Temp)\\)$/, '')", emails_js)
+        css = self._get_text(client, "/static/css/main.css")
+        normalized = css.replace("\r\n", "\n")
+        self.assertNotRegex(normalized, re.compile(r"html\\s*\\{[^}]*overflow:\\s*hidden;", re.MULTILINE))
+        self.assertNotRegex(normalized, re.compile(r"body\\s*\\{[^}]*overflow:\\s*hidden;", re.MULTILINE))

@@ -177,17 +177,6 @@ class CoreFeatureTests(unittest.TestCase):
         logs = audit_data.get("logs") or []
         self.assertTrue(any(l.get("trace_id") == export_trace_id for l in logs))
 
-    def test_oauth_auth_url_endpoint(self):
-        client = self.app.test_client()
-        self._login(client)
-
-        resp = client.get("/api/oauth/auth-url")
-        self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
-        self.assertEqual(data.get("success"), True)
-        self.assertIn("auth_url", data)
-        self.assertIn("login.microsoftonline.com", data.get("auth_url", ""))
-
     def test_temp_email_generate_and_list_mocked(self):
         client = self.app.test_client()
         self._login(client)

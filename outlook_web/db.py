@@ -27,7 +27,8 @@ from outlook_web.security.crypto import (
 # v11：PRD-00009 MT-1 — 邮箱池字段（pool_status/claimed_by/...）+ account_claim_logs 表 + pool settings
 # v12：PRD-00009 P2 — external_api_keys 新增 pool_access 布尔权限
 # v13：PRD-00010 V1.90 — 邮件通知设置 + 统一通知游标/投递日志表
-DB_SCHEMA_VERSION = 13
+# v14：PRD-00011 V1.91 — accounts 表新增简洁模式摘要字段，/api/accounts 只读持久化摘要
+DB_SCHEMA_VERSION = 14
 DB_SCHEMA_VERSION_KEY = "db_schema_version"
 DB_SCHEMA_LAST_UPGRADE_TRACE_ID_KEY = "db_schema_last_upgrade_trace_id"
 DB_SCHEMA_LAST_UPGRADE_ERROR_KEY = "db_schema_last_upgrade_error"
@@ -369,6 +370,20 @@ def init_db(database_path: Optional[str] = None):
             cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_push_enabled INTEGER NOT NULL DEFAULT 0")
         if "telegram_last_checked_at" not in columns:
             cursor.execute("ALTER TABLE accounts ADD COLUMN telegram_last_checked_at TEXT DEFAULT NULL")
+        if "latest_email_subject" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_email_subject TEXT DEFAULT ''")
+        if "latest_email_from" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_email_from TEXT DEFAULT ''")
+        if "latest_email_folder" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_email_folder TEXT DEFAULT ''")
+        if "latest_email_received_at" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_email_received_at TEXT DEFAULT ''")
+        if "latest_verification_code" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_verification_code TEXT DEFAULT ''")
+        if "latest_verification_folder" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_verification_folder TEXT DEFAULT ''")
+        if "latest_verification_received_at" not in columns:
+            cursor.execute("ALTER TABLE accounts ADD COLUMN latest_verification_received_at TEXT DEFAULT ''")
 
         cursor.execute("PRAGMA table_info(groups)")
         group_columns = [col[1] for col in cursor.fetchall()]

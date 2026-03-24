@@ -37,6 +37,7 @@ app = create_app(autostart_scheduler=None if __name__ != "__main__" else False)
 
 __all__ = [
     "app",
+    "main",
     "create_sqlite_connection",
     "MAX_LOGIN_ATTEMPTS",
     "sanitize_error_details",
@@ -48,7 +49,7 @@ __all__ = [
 ]
 
 
-if __name__ == "__main__":
+def main() -> None:
     port = int(os.getenv("PORT", 5000))
     host = os.getenv("HOST", "0.0.0.0")
     debug = os.getenv("FLASK_ENV", "production") != "production"
@@ -62,8 +63,15 @@ if __name__ == "__main__":
 
     # 初始化定时任务（与旧版行为保持一致）
     if not debug or os.getenv("WERKZEUG_RUN_MAIN") == "true":
-        scheduler_service.init_scheduler(app, graph_service.test_refresh_token)
+        if scheduler_service.should_autostart_scheduler():
+            scheduler_service.init_scheduler(app, graph_service.test_refresh_token)
+        else:
+            print("✓ 已根据配置跳过启动调度器")
     else:
         print("✓ 调试重载器父进程：跳过启动调度器")
 
     app.run(debug=debug, host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()

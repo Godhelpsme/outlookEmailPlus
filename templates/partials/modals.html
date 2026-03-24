@@ -125,7 +125,6 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="hideAddAccountModal()">取消</button>
-                <button class="btn btn-primary" id="getRefreshTokenBtnInAdd" onclick="showGetRefreshTokenModal()" style="background-color: #0078d4;">🔑 获取 Token</button>
                 <button class="btn btn-primary" onclick="addAccount()">导入</button>
             </div>
         </div>
@@ -165,7 +164,12 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">备注</label>
+                    <input type="hidden" id="editRemarkValue">
                     <textarea class="form-textarea" id="editRemark" placeholder="可选" rows="3"></textarea>
+                    <div class="form-hint">备注支持单独保存，不会连带修改账号凭据等其他字段。</div>
+                    <div style="margin-top: 8px;">
+                        <button class="btn btn-sm btn-ghost" type="button" onclick="openRemarkEditorFromEditModal()">单独编辑备注</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">状态</label>
@@ -179,6 +183,32 @@
                 <button class="btn btn-danger" onclick="deleteCurrentAccount()" style="margin-right: auto;">删除</button>
                 <button class="btn btn-secondary" onclick="hideEditAccountModal()">取消</button>
                 <button class="btn btn-primary" onclick="updateAccount()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 备注编辑模态框 -->
+    <div class="modal" id="accountRemarkModal" onclick="if(event.target === this) hideAccountRemarkModal()">
+        <div class="modal-content" style="width: 420px;">
+            <div class="modal-header">
+                <h3>编辑备注</h3>
+                <button class="modal-close" onclick="hideAccountRemarkModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="remarkAccountId">
+                <div class="form-group">
+                    <label class="form-label">账号</label>
+                    <input type="text" class="form-input" id="remarkAccountEmail" readonly>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">备注</label>
+                    <textarea class="form-textarea" id="remarkInput" placeholder="支持新增、修改和清空" rows="5"></textarea>
+                    <div class="form-hint">这里会调用轻量 PATCH 接口，只更新备注本身。</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="hideAccountRemarkModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveAccountRemark()">保存备注</button>
             </div>
         </div>
     </div>
@@ -255,7 +285,7 @@
     <div class="modal" id="refreshModal" onclick="if(event.target === this) hideRefreshModal()">
         <div class="modal-content" style="width: 800px; max-width: 90vw;">
             <div class="modal-header">
-                <h3>🔄 Token 刷新管理</h3>
+                <h3 id="refreshModalTitle">🔄 令牌刷新管理</h3>
                 <button class="modal-close" onclick="hideRefreshModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -265,7 +295,7 @@
                     <div
                         style="font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #333; display: flex; align-items: center; gap: 8px;">
                         <span>📊</span>
-                        <span>刷新统计</span>
+                        <span id="refreshStatsTitle">刷新统计</span>
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
                         <div
@@ -273,7 +303,7 @@
                             <div
                                 style="font-size: 12px; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
                                 <span>🕐</span>
-                                <span>上次全量刷新</span>
+                                <span id="lastRefreshLabel">上次全量刷新</span>
                             </div>
                             <div style="font-size: 13px; font-weight: 600; color: #333;" id="lastRefreshTime">-</div>
                         </div>
@@ -282,7 +312,7 @@
                             <div
                                 style="font-size: 12px; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
                                 <span>📝</span>
-                                <span>总邮箱数</span>
+                                <span id="totalRefreshLabel">总邮箱数</span>
                             </div>
                             <div style="font-size: 18px; font-weight: 700; color: #333;" id="totalRefreshCount">0</div>
                         </div>
@@ -291,7 +321,7 @@
                             <div
                                 style="font-size: 12px; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
                                 <span>✅</span>
-                                <span>成功邮箱</span>
+                                <span id="successRefreshLabel">成功邮箱</span>
                             </div>
                             <div style="font-size: 18px; font-weight: 700; color: #28a745;" id="successRefreshCount">0
                             </div>
@@ -301,7 +331,7 @@
                             <div
                                 style="font-size: 12px; color: #666; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
                                 <span>❌</span>
-                                <span>失败邮箱</span>
+                                <span id="failedRefreshLabel">失败邮箱</span>
                             </div>
                             <div style="font-size: 18px; font-weight: 700; color: #dc3545;" id="failedRefreshCount">0
                             </div>
@@ -318,10 +348,10 @@
                     <button class="btn btn-warning" onclick="retryFailedAccounts()" id="retryFailedBtn">
                         🔁 重试失败
                     </button>
-                    <button class="btn btn-secondary" onclick="loadFailedLogs()">
+                    <button class="btn btn-secondary" onclick="loadFailedLogs()" id="loadFailedLogsBtn">
                         ❌ 失败邮箱
                     </button>
-                    <button class="btn btn-secondary" onclick="loadRefreshLogs()">
+                    <button class="btn btn-secondary" onclick="loadRefreshLogs()" id="loadRefreshLogsBtn">
                         📋 刷新历史
                     </button>
                 </div>
@@ -329,7 +359,7 @@
                 <!-- 刷新进度 -->
                 <div id="refreshProgress"
                     style="display: none; background-color: #e3f2fd; padding: 16px; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #2196f3;">
-                    <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #1976d2;">正在刷新...</div>
+                    <div id="refreshProgressTitle" style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #1976d2;">正在刷新...</div>
                     <div style="font-size: 13px; line-height: 1.8;" id="refreshProgressText">请稍候</div>
                 </div>
 
@@ -337,8 +367,8 @@
                 <div id="failedListContainer" style="display: none;">
                     <div
                         style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                        <span>当前失败状态的邮箱</span>
-                        <button class="btn btn-sm btn-secondary" onclick="hideFailedList()">隐藏</button>
+                        <span id="failedListTitle">当前失败状态的邮箱</span>
+                        <button class="btn btn-sm btn-secondary" onclick="hideFailedList()" id="hideFailedListBtn">隐藏</button>
                     </div>
                     <div id="failedList"
                         style="max-height: 300px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 6px;">
@@ -352,9 +382,9 @@
                         style="font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; padding: 10px; background-color: #f8f9fa; border-radius: 6px;">
                         <span style="display: flex; align-items: center; gap: 6px;">
                             <span>📋</span>
-                            <span>全量刷新历史</span>
+                            <span id="refreshLogsTitle">全量刷新历史</span>
                         </span>
-                        <button class="btn btn-sm btn-secondary" onclick="hideRefreshLogs()">隐藏</button>
+                        <button class="btn btn-sm btn-secondary" onclick="hideRefreshLogs()" id="hideRefreshLogsBtn">隐藏</button>
                     </div>
                     <div id="refreshLogsList"
                         style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e5e5; border-radius: 6px; background-color: white;">
@@ -363,7 +393,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="hideRefreshModal()">关闭</button>
+                <button class="btn btn-secondary" onclick="hideRefreshModal()" id="refreshModalCloseBtn">关闭</button>
             </div>
         </div>
     </div>
@@ -518,64 +548,18 @@
                     <div class="error-message-box" id="refreshErrorMessage"></div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">💡 解决建议</label>
-                    <ul class="solution-list">
-                        <li>检查账号信息中的 <strong>Client ID</strong> 和 <strong>Refresh Token</strong> 是否填写正确且没有多余的空格。</li>
-                        <li>尝试使用"获取 Refresh Token"功能，重新为该账号生成一个新的 Token。</li>
-                        <li>检查账号是否在 Microsoft 365 管理中心被禁用或相关权限是否被撤销。</li>
+                    <div class="form-group">
+                    <label class="form-label">💡 处理建议</label>
+                    <ul class="solution-list" id="refreshErrorSuggestions">
+                        <li>检查账号配置是否完整且没有多余空格，然后重试。</li>
+                        <li>如近期改过账号凭据或授权信息，请重新保存后再验证。</li>
+                        <li>如问题持续存在，请根据邮箱类型检查对应的登录权限或授权状态。</li>
                     </ul>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="hideRefreshErrorModal()">关闭</button>
                 <button class="btn btn-primary" id="editAccountFromErrorBtn">编辑账号</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 获取 Refresh Token 模态框 -->
-    <div class="modal" id="getRefreshTokenModal" onclick="if(event.target === this) hideGetRefreshTokenModal()">
-        <div class="modal-content" style="width: 600px;">
-            <div class="modal-header">
-                <h3>🔑 获取 Refresh Token</h3>
-                <button class="modal-close" onclick="hideGetRefreshTokenModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">步骤 1: 访问授权链接</label>
-                    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                        <input type="text" class="form-input" id="authUrlInput" readonly
-                            style="flex: 1; font-size: 12px; font-family: monospace;">
-                        <button class="btn btn-secondary" onclick="copyAuthUrl()" style="white-space: nowrap;">📋
-                            复制</button>
-                        <button class="btn btn-primary" onclick="openAuthUrl()" style="white-space: nowrap;">🔗
-                            打开</button>
-                    </div>
-                    <div class="form-hint">点击"打开"按钮在浏览器中授权，或点击"复制"后手动粘贴到浏览器</div>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">步骤 2: 粘贴授权后的完整 URL</label>
-                    <textarea class="form-textarea" id="redirectUrlInput"
-                        placeholder="授权成功后，浏览器会跳转到一个空白页，请复制地址栏中的完整 URL 并粘贴到这里"
-                        style="height: 80px; font-size: 12px; font-family: monospace;"></textarea>
-                    <div class="form-hint">URL 格式类似：http://localhost:8080/?code=xxxxx&state=12345</div>
-                </div>
-
-                <div class="form-group" id="refreshTokenResult" style="display: none;">
-                    <label class="form-label">✅ 账号信息（已获取成功）</label>
-                    <textarea class="form-textarea" id="refreshTokenOutput" readonly
-                        style="height: 100px; font-size: 12px; font-family: monospace; background-color: #f0f9ff; border-color: #0078d4;"></textarea>
-                    <div class="form-hint" style="color: #0078d4;">
-                        <strong>格式说明：</strong>邮箱----密码----client_id----refresh_token<br>
-                        请将"your@outlook.com"和"yourpassword"替换为您的实际邮箱和密码，然后复制整行内容到"导入邮箱"中使用
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="hideGetRefreshTokenModal()">关闭</button>
-                <button class="btn btn-primary" id="exchangeTokenBtn" onclick="exchangeToken()">换取 Token</button>
             </div>
         </div>
     </div>

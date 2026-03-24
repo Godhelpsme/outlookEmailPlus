@@ -69,6 +69,7 @@
         // Provider 下拉缓存
         let providersLoaded = false;
         let providerOptions = [];
+        let remarkEditContext = { accountId: null, email: '', groupId: null };
 
         function buildImportFailureToastMessage(data) {
             const baseMessage = pickApiMessage(data, data.message || '导入失败', data.message_en || 'Import failed');
@@ -232,6 +233,42 @@
             document.getElementById('addAccountModal').classList.remove('show');
         }
 
+        function resolveImportGroupId(rawGroupId) {
+            return Number.isInteger(rawGroupId) && rawGroupId > 0 ? rawGroupId : null;
+        }
+
+        async function refreshMailboxAfterImport(provider, importedGroupId) {
+            await loadGroups();
+
+            if (currentPage !== 'mailbox') {
+                return;
+            }
+
+            if (provider === 'auto') {
+                if (!currentGroupId) {
+                    const firstNormalGroup = groups.find(group => group.name !== '临时邮箱');
+                    if (firstNormalGroup) {
+                        await selectGroup(firstNormalGroup.id);
+                    }
+                }
+                return;
+            }
+
+            if (!importedGroupId) {
+                if (currentGroupId) {
+                    await loadAccountsByGroup(currentGroupId, true);
+                }
+                return;
+            }
+
+            if (currentGroupId === importedGroupId) {
+                await loadAccountsByGroup(importedGroupId, true);
+                return;
+            }
+
+            await selectGroup(importedGroupId);
+        }
+
         // 添加账号
         async function addAccount() {
             const input = document.getElementById('accountInput').value.trim();
@@ -239,6 +276,7 @@
             const providerEl = document.getElementById('accountProvider');
             const provider = providerEl ? (providerEl.value || 'outlook') : 'outlook';
             const addToPool = Boolean(document.getElementById('addToPoolCheckbox')?.checked);
+            const importedGroupId = resolveImportGroupId(groupId);
 
             if (!input) {
                 showToast(translateAppTextLocal('请输入账号信息'), 'error');
@@ -318,18 +356,12 @@
                         if (provider === 'auto') {
                             // auto 模式可能影响多个分组，清除所有缓存
                             for (const key in accountsCache) { delete accountsCache[key]; }
-                        } else {
-                            delete accountsCache[groupId];
+                        } else if (importedGroupId) {
+                            delete accountsCache[importedGroupId];
                         }
                     }
 
-                    // 刷新分组列表（更新数量）
-                    loadGroups();
-
-                    // 如果当前选中的就是这个分组，刷新邮箱列表
-                    if (currentGroupId && currentGroupId === groupId) {
-                        loadAccountsByGroup(groupId, true);
-                    }
+                    await refreshMailboxAfterImport(provider, importedGroupId);
                 } else if (data.summary || Array.isArray(data.errors)) {
                     showToast(buildImportFailureToastMessage(data), 'error', data.error || data);
                 } else {
@@ -349,14 +381,18 @@
                 if (data.success) {
                     const acc = data.account;
                     const isImap = (acc.account_type || 'outlook') === 'imap';
+                    const clientIdInput = document.getElementById('editClientId');
+                    const refreshTokenInput = document.getElementById('editRefreshToken');
 
                     document.getElementById('editAccountId').value = acc.id;
                     document.getElementById('editAccountType').value = acc.account_type || 'outlook';
                     document.getElementById('editEmail').value = acc.email;
                     document.getElementById('editPassword').value = acc.password || '';
-                    document.getElementById('editClientId').value = acc.client_id;
-                    document.getElementById('editRefreshToken').value = acc.refresh_token;
+                    clientIdInput.value = acc.client_id;
+                    clientIdInput.dataset.originalValue = acc.client_id || '';
+                    refreshTokenInput.value = acc.refresh_token;
                     document.getElementById('editGroupSelect').value = acc.group_id || 1;
+                    document.getElementById('editRemarkValue').value = acc.remark || '';
                     document.getElementById('editRemark').value = acc.remark || '';
                     document.getElementById('editStatus').value = acc.status || 'active';
 
@@ -370,11 +406,13 @@
                         refreshTokenGroup.style.display = 'none';
                         passwordLabel.textContent = translateAppTextLocal('授权码 / 应用密码');
                         document.getElementById('editPassword').placeholder = translateAppTextLocal('留空则不修改');
+                        refreshTokenInput.placeholder = '';
                     } else {
                         clientIdGroup.style.display = '';
                         refreshTokenGroup.style.display = '';
                         passwordLabel.textContent = translateAppTextLocal('密码');
                         document.getElementById('editPassword').placeholder = translateAppTextLocal('可选，留空则不修改');
+                        refreshTokenInput.placeholder = translateAppTextLocal('留空则不修改');
                     }
 
                     document.getElementById('editAccountModal').classList.add('show');
@@ -389,6 +427,72 @@
             document.getElementById('editAccountModal').classList.remove('show');
         }
 
+        function showAccountRemarkModal(accountId, email, remark = '', groupId = null) {
+            remarkEditContext = {
+                accountId,
+                email: email || '',
+                groupId: groupId || currentGroupId
+            };
+            document.getElementById('remarkAccountId').value = accountId || '';
+            document.getElementById('remarkAccountEmail').value = email || '';
+            document.getElementById('remarkInput').value = remark || '';
+            document.getElementById('accountRemarkModal').classList.add('show');
+        }
+
+        function hideAccountRemarkModal() {
+            document.getElementById('accountRemarkModal').classList.remove('show');
+            remarkEditContext = { accountId: null, email: '', groupId: null };
+        }
+
+        function openRemarkEditorFromEditModal() {
+            const accountId = parseInt(document.getElementById('editAccountId').value || '0', 10);
+            const email = document.getElementById('editEmail').value || '';
+            const remark = document.getElementById('editRemark').value || '';
+            const groupId = parseInt(document.getElementById('editGroupSelect').value || currentGroupId || '0', 10);
+            showAccountRemarkModal(accountId, email, remark, groupId);
+        }
+
+        async function saveAccountRemark() {
+            const accountId = parseInt(document.getElementById('remarkAccountId').value || '0', 10);
+            const remark = document.getElementById('remarkInput').value;
+            if (!accountId) {
+                showToast(translateAppTextLocal('账号不存在'), 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/accounts/${accountId}/remark`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ remark })
+                });
+                const data = await response.json();
+
+                if (!data.success) {
+                    handleApiError(data, '备注更新失败');
+                    return;
+                }
+
+                showToast(pickApiMessage(data, data.message, 'Remark updated successfully'), 'success');
+
+                const editAccountId = parseInt(document.getElementById('editAccountId')?.value || '0', 10);
+                if (editAccountId === accountId) {
+                    document.getElementById('editRemarkValue').value = remark;
+                    document.getElementById('editRemark').value = remark;
+                }
+
+                const targetGroupId = remarkEditContext.groupId || currentGroupId;
+                hideAccountRemarkModal();
+
+                if (targetGroupId) {
+                    delete accountsCache[targetGroupId];
+                    await loadAccountsByGroup(targetGroupId, true);
+                }
+            } catch (error) {
+                showToast(translateAppTextLocal('备注更新失败'), 'error');
+            }
+        }
+
         // 更新账号
         async function updateAccount() {
             const accountId = document.getElementById('editAccountId').value;
@@ -396,12 +500,19 @@
             const isImap = accountType === 'imap';
             const oldGroupId = currentGroupId;
             const newGroupId = parseInt(document.getElementById('editGroupSelect').value);
+            const clientIdInput = document.getElementById('editClientId');
+            const refreshTokenInput = document.getElementById('editRefreshToken');
+            const clientId = clientIdInput.value.trim();
+            const refreshToken = refreshTokenInput.value.trim();
+            const originalClientId = (clientIdInput.dataset.originalValue || '').trim();
+            const hasClientIdChanged = !isImap && clientId !== originalClientId;
+            const wantsToUpdateOutlookCredentials = !isImap && (hasClientIdChanged || !!refreshToken);
 
             const data = {
                 email: document.getElementById('editEmail').value.trim(),
                 password: document.getElementById('editPassword').value,
-                client_id: document.getElementById('editClientId').value.trim(),
-                refresh_token: document.getElementById('editRefreshToken').value.trim(),
+                client_id: wantsToUpdateOutlookCredentials ? clientId : '',
+                refresh_token: wantsToUpdateOutlookCredentials ? refreshToken : '',
                 group_id: newGroupId,
                 remark: document.getElementById('editRemark').value.trim(),
                 status: document.getElementById('editStatus').value
@@ -412,8 +523,8 @@
                 return;
             }
 
-            // Outlook 账号需要 Client ID 和 Refresh Token
-            if (!isImap && (!data.client_id || !data.refresh_token)) {
+            // 仅在用户实际修改 Outlook 凭据时，才要求提交完整凭据对
+            if (wantsToUpdateOutlookCredentials && (!data.client_id || !data.refresh_token)) {
                 showToast(translateAppTextLocal('邮箱、Client ID 和 Refresh Token 不能为空'), 'error');
                 return;
             }

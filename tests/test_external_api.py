@@ -87,6 +87,14 @@ class ExternalApiBaseTest(unittest.TestCase):
             db.commit()
         return email_addr
 
+    def _set_account_status(self, email_addr: str, status: str):
+        with self.app.app_context():
+            from outlook_web.db import get_db
+
+            db = get_db()
+            db.execute("UPDATE accounts SET status = ? WHERE email = ?", (status, email_addr))
+            db.commit()
+
     @staticmethod
     def _auth_headers(value: str = "abc123"):
         return {"X-API-Key": value}
@@ -628,6 +636,23 @@ class ExternalApiSystemTests(ExternalApiBaseTest):
         self.assertEqual(len(audit_logs), 1)
         self.assertIn("/api/external/health", audit_logs[0]["details"])
 
+    @patch("outlook_web.controllers.system.external_api_service.probe_instance_upstream")
+    def test_external_health_uses_probe_instance_upstream(self, mock_probe_instance_upstream):
+        client = self.app.test_client()
+        self._set_external_api_key("abc123")
+        mock_probe_instance_upstream.return_value = {
+            "upstream_probe_ok": True,
+            "last_probe_at": self._utc_iso(),
+            "last_probe_error": "",
+            "probe_method": "Graph API",
+        }
+
+        resp = client.get("/api/external/health", headers=self._auth_headers())
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json().get("data", {}).get("upstream_probe_ok"))
+        mock_probe_instance_upstream.assert_called_once()
+
     @patch("outlook_web.services.external_api.graph_service.get_emails_graph")
     def test_external_account_status_returns_account_data_and_audits(self, mock_get_emails_graph):
         email_addr = self._insert_outlook_account()
@@ -864,6 +889,21 @@ class ExternalApiSchemaValidationTests(ExternalApiBaseTest):
         for key in ("email", "exists", "upstream_probe_ok", "probe_method", "last_probe_at", "last_probe_error"):
             self.assertIn(key, data, f"AccountStatusData 缺少字段: {key}")
         self.assertIn("status", data, "AccountStatusData 应返回 status 字段")
+
+    @patch("outlook_web.services.external_api.graph_service.get_emails_graph")
+    def test_account_status_marks_inactive_account_as_not_readable(self, mock_get_emails_graph):
+        email_addr = self._insert_outlook_account()
+        self._set_account_status(email_addr, "inactive")
+        self._set_external_api_key("abc123")
+        client = self.app.test_client()
+
+        resp = client.get(f"/api/external/account-status?email={email_addr}", headers=self._auth_headers())
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json().get("data", {})
+        self.assertFalse(data.get("can_read"))
+        self.assertIsNone(data.get("upstream_probe_ok"))
+        mock_get_emails_graph.assert_not_called()
 
 
 class ExternalApiRawFieldTrimTests(ExternalApiBaseTest):
@@ -1165,6 +1205,91 @@ class ExternalApiMessageErrorTests(ExternalApiBaseTest):
 
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(resp.get_json().get("code"), "PROXY_ERROR")
+
+    @patch("outlook_web.services.graph.get_emails_graph")
+    def test_proxy_error_with_nested_payload_still_returns_502_proxy_error(self, mock_graph):
+        """TC-MSG-15 扩展：Graph 返回结构化错误 payload 时仍应保持 502 PROXY_ERROR"""
+        from outlook_web.errors import build_error_payload
+
+        email_addr = self._insert_outlook_account()
+        self._set_external_api_key("abc123")
+        mock_graph.return_value = {
+            "success": False,
+            "error": build_error_payload(
+                "GRAPH_TOKEN_EXCEPTION",
+                "Proxy tunnel failed",
+                err_type="ProxyError",
+                status=500,
+                details="proxy-down",
+                trace_id="test-trace",
+            ),
+        }
+
+        client = self.app.test_client()
+        resp = client.get(
+            f"/api/external/messages?email={email_addr}",
+            headers=self._auth_headers(),
+        )
+
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.get_json().get("code"), "PROXY_ERROR")
+        audit_logs = self._external_audit_logs()
+        self.assertTrue(audit_logs)
+        details = json.loads(audit_logs[-1]["details"]) if isinstance(audit_logs[-1]["details"], str) else audit_logs[-1]["details"]
+        self.assertEqual(details.get("code"), "PROXY_ERROR")
+
+    @patch("outlook_web.services.external_api.get_email_detail_imap_generic_result")
+    def test_imap_detail_nested_error_uses_final_public_code_in_response_and_audit(self, mock_detail_result):
+        email_addr = self._insert_imap_account()
+        self._set_external_api_key("abc123")
+        mock_detail_result.return_value = {
+            "success": False,
+            "error": {
+                "code": "IMAP_AUTH_FAILED",
+                "message": "IMAP 认证失败：Outlook.com 已阻止 Basic Auth（账号密码直连），请改用 Outlook OAuth 导入（client_id + refresh_token）",
+                "message_en": "IMAP authentication failed: Outlook.com blocked Basic Auth. Use Outlook OAuth import instead.",
+                "type": "IMAPAuthError",
+                "status": 401,
+                "details": "",
+                "trace_id": "test-trace",
+            },
+            "error_code": "IMAP_AUTH_FAILED",
+        }
+
+        client = self.app.test_client()
+        resp = client.get(
+            f"/api/external/messages/msg-1?email={email_addr}",
+            headers=self._auth_headers(),
+        )
+
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.get_json().get("code"), "IMAP_AUTH_FAILED")
+        audit_logs = self._external_audit_logs()
+        self.assertTrue(audit_logs)
+        details = json.loads(audit_logs[-1]["details"]) if isinstance(audit_logs[-1]["details"], str) else audit_logs[-1]["details"]
+        self.assertEqual(details.get("code"), "IMAP_AUTH_FAILED")
+
+    def test_messages_for_inactive_account_returns_403(self):
+        email_addr = self._insert_outlook_account()
+        self._set_account_status(email_addr, "inactive")
+        self._set_external_api_key("abc123")
+
+        client = self.app.test_client()
+        resp = client.get(f"/api/external/messages?email={email_addr}", headers=self._auth_headers())
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json().get("code"), "ACCOUNT_ACCESS_FORBIDDEN")
+
+    def test_wait_message_for_disabled_account_returns_403(self):
+        email_addr = self._insert_outlook_account()
+        self._set_account_status(email_addr, "disabled")
+        self._set_external_api_key("abc123")
+
+        client = self.app.test_client()
+        resp = client.get(f"/api/external/wait-message?email={email_addr}", headers=self._auth_headers())
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json().get("code"), "ACCOUNT_ACCESS_FORBIDDEN")
 
 
 # ---------------------------------------------------------------------------

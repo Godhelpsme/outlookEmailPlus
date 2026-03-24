@@ -25,6 +25,7 @@ from outlook_web.repositories.distributed_locks import (
 from outlook_web.repositories.refresh_runs import create_refresh_run, finish_refresh_run
 from outlook_web.security.auth import get_client_ip, get_user_agent, login_required
 from outlook_web.security.crypto import decrypt_data
+from outlook_web.services import account_compact_summary as compact_summary_service
 from outlook_web.services import graph as graph_service
 from outlook_web.services import refresh as refresh_service
 
@@ -75,6 +76,45 @@ def _build_account_import_failure_response(
         status=400,
         extra={"summary": summary, "errors": errors},
     )
+
+
+def _build_credential_error_state(account: Dict[str, Any]) -> Dict[str, Any]:
+    credential_errors = account.get("_credential_errors") or []
+    fields = [str(item.get("field") or "").strip() for item in credential_errors if item.get("field")]
+    return {
+        "credential_error": bool(fields),
+        "credential_error_fields": fields,
+    }
+
+
+def _parse_imap_port(value: Any) -> int | None:
+    try:
+        port = int((value or "").strip() if isinstance(value, str) else value)
+    except Exception:
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def _looks_like_imap_host(value: str) -> bool:
+    text = (value or "").strip().lower()
+    return bool(text and "." in text and "@" not in text and " " not in text)
+
+
+def _is_outlook_basic_auth_target(email_addr: str, host: str = "", provider_key: str = "") -> bool:
+    from outlook_web.services.providers import infer_provider_from_email
+
+    inferred_provider = infer_provider_from_email(email_addr)
+    normalized_host = (host or "").strip().lower()
+    normalized_provider = (provider_key or "").strip().lower()
+    return (
+        inferred_provider == "outlook"
+        or normalized_provider == "outlook"
+        or normalized_host in {"outlook.live.com", "outlook.office365.com"}
+    )
+
+
+def _outlook_basic_auth_import_error() -> str:
+    return "Outlook 邮箱不支持 IMAP Basic Auth 直连（包括 custom host 导入），请使用 4 段 OAuth 格式：邮箱----密码----client_id----refresh_token"
 
 
 # ==================== 账号基础 CRUD API ====================
@@ -128,6 +168,8 @@ def api_get_accounts() -> Any:
         except Exception:
             acc_id_int = None
         last_refresh_log = last_log_by_account.get(acc_id_int) if acc_id_int is not None else None
+        compact_summary = compact_summary_service.build_summary_from_account_row(acc)
+        credential_error_state = _build_credential_error_state(acc)
 
         safe_accounts.append(
             {
@@ -148,6 +190,9 @@ def api_get_accounts() -> Any:
                 "updated_at": acc.get("updated_at", ""),
                 "tags": acc.get("tags", []),
                 "telegram_push_enabled": bool(acc.get("telegram_push_enabled")),
+                "notification_enabled": bool(acc.get("telegram_push_enabled")),
+                **credential_error_state,
+                **compact_summary,
             }
         )
     return jsonify({"success": True, "accounts": safe_accounts})
@@ -178,6 +223,8 @@ def api_get_account(account_id: int) -> Any:
                 "status": account.get("status", "active"),
                 "account_type": account.get("account_type") or "outlook",
                 "provider": account.get("provider") or "outlook",
+                "telegram_push_enabled": bool(account.get("telegram_push_enabled")),
+                "notification_enabled": bool(account.get("telegram_push_enabled")),
                 "created_at": account.get("created_at", ""),
                 "updated_at": account.get("updated_at", ""),
             },
@@ -270,10 +317,13 @@ def api_add_account() -> Any:
             if custom_imap_port is None or str(custom_imap_port).strip() == "":
                 custom_port_val = 993
             else:
-                try:
-                    custom_port_val = int(str(custom_imap_port).strip())
-                except Exception:
-                    custom_port_val = 993
+                custom_port_val = _parse_imap_port(custom_imap_port)
+                if custom_port_val is None:
+                    return build_error_response(
+                        "INVALID_PARAM",
+                        "IMAP 端口必须在 1-65535 之间",
+                        message_en="IMAP port must be between 1 and 65535",
+                    )
         else:
             custom_port_val = None
 
@@ -317,16 +367,10 @@ def api_add_account() -> Any:
                 # 3) 2 段（配合输入框）：email----imap_password（host/port 从 request body 取）
                 if len(parts) >= 5 and (parts[2] or "").strip().lower() == "custom":
                     imap_host = (parts[3] or "").strip()
-                    try:
-                        imap_port = int((parts[4] or "").strip() or 993)
-                    except Exception:
-                        imap_port = 993
+                    imap_port = _parse_imap_port(parts[4])
                 elif len(parts) >= 4:
                     imap_host = (parts[2] or "").strip()
-                    try:
-                        imap_port = int((parts[3] or "").strip() or 993)
-                    except Exception:
-                        imap_port = 993
+                    imap_port = _parse_imap_port(parts[3])
                 else:
                     imap_host = custom_imap_host
                     imap_port = custom_port_val if custom_port_val is not None else 993
@@ -342,6 +386,18 @@ def api_add_account() -> Any:
                                 "error": "自定义 IMAP 必须提供服务器地址（imap_host）",
                             }
                         )
+                    continue
+                if imap_port is None:
+                    failed += 1
+                    errors_total += 1
+                    if len(errors) < max_error_details:
+                        errors.append({"line": line_no, "email": email_addr, "error": "IMAP 端口必须在 1-65535 之间"})
+                    continue
+                if _is_outlook_basic_auth_target(email_addr, imap_host, provider):
+                    failed += 1
+                    errors_total += 1
+                    if len(errors) < max_error_details:
+                        errors.append({"line": line_no, "email": email_addr, "error": _outlook_basic_auth_import_error()})
                     continue
             else:
                 # 兼容导出格式：email----imap_password----provider
@@ -360,6 +416,13 @@ def api_add_account() -> Any:
                                 }
                             )
                         continue
+
+                if _is_outlook_basic_auth_target(email_addr, default_imap_host, provider):
+                    failed += 1
+                    errors_total += 1
+                    if len(errors) < max_error_details:
+                        errors.append({"line": line_no, "email": email_addr, "error": _outlook_basic_auth_import_error()})
+                    continue
 
                 if not imap_host:
                     failed += 1
@@ -585,12 +648,13 @@ def _detect_line_type(
         email = parts[0].strip()
         imap_pwd = parts[1].strip()
         host = (parts[3] or "").strip()
-        try:
-            port = int((parts[4] or "").strip() or 993)
-        except Exception:
-            port = 993
+        port = _parse_imap_port(parts[4])
         if not email or not imap_pwd or not host:
             return _err("custom 5段格式缺少必要字段")
+        if port is None:
+            return _err("IMAP 端口必须在 1-65535 之间")
+        if _is_outlook_basic_auth_target(email, host, "custom"):
+            return _err(_outlook_basic_auth_import_error())
         return {
             "type": "imap",
             "provider": "custom",
@@ -599,11 +663,27 @@ def _detect_line_type(
             "auto_group_name": PROVIDER_GROUP_NAME.get("custom", "自定义IMAP"),
         }
 
-    # n >= 4 → Outlook（OAuth）
+    # n >= 4 且第 3 段像 host、第 4 段像 port → 自定义 IMAP
     if n >= 4:
         email = parts[0].strip()
         password = parts[1].strip()
-        client_id = parts[2].strip()
+        third = parts[2].strip()
+        fourth = parts[3].strip()
+        if _looks_like_imap_host(third):
+            port = _parse_imap_port(fourth)
+            if port is None:
+                return _err("IMAP 端口必须在 1-65535 之间")
+            if _is_outlook_basic_auth_target(email, third, "custom"):
+                return _err(_outlook_basic_auth_import_error())
+            return {
+                "type": "imap",
+                "provider": "custom",
+                "fields": {"email": email, "imap_password": password, "imap_host": third, "imap_port": port},
+                "error": None,
+                "auto_group_name": PROVIDER_GROUP_NAME.get("custom", "自定义IMAP"),
+            }
+
+        client_id = third
         refresh_token = "----".join(parts[3:]).strip()
         if not email or not client_id or not refresh_token:
             return _err("Outlook 格式缺少 client_id 或 refresh_token")
@@ -624,6 +704,8 @@ def _detect_line_type(
             return _err("3段格式缺少邮箱或密码")
         if prov not in KNOWN_PROVIDER_KEYS:
             return _err(f"未知的 provider: {prov}")
+        if _is_outlook_basic_auth_target(email, provider_key=prov):
+            return _err(_outlook_basic_auth_import_error())
         cfg = MAIL_PROVIDERS.get(prov, {})
         host = cfg.get("imap_host", "")
         port = int(cfg.get("imap_port", 993))
@@ -645,6 +727,8 @@ def _detect_line_type(
             return _err("2段格式缺少邮箱或密码")
         prov = infer_provider_from_email(email)
         if prov:
+            if _is_outlook_basic_auth_target(email, provider_key=prov):
+                return _err(_outlook_basic_auth_import_error())
             cfg = MAIL_PROVIDERS.get(prov, {})
             host = cfg.get("imap_host", "")
             port = int(cfg.get("imap_port", 993))
@@ -1003,11 +1087,13 @@ def _handle_auto_import(data: Dict[str, Any], *, add_to_pool: bool = False) -> A
 @login_required
 def api_update_account(account_id: int) -> Any:
     """更新账号"""
-    data = request.json
+    data = request.json or {}
+    existing_account = accounts_repo.get_account_by_id(account_id)
+    if not existing_account:
+        return build_error_response("ACCOUNT_NOT_FOUND", "账号不存在", message_en="Account not found", status=404)
 
     # 检查是否只更新状态
     if "status" in data and len(data) == 1:
-        # 只更新状态
         return _api_update_account_status(account_id, data["status"])
 
     email_addr = (data.get("email") or "").strip()
@@ -1020,9 +1106,27 @@ def api_update_account(account_id: int) -> Any:
         group_id = 1
     remark = sanitize_input(data.get("remark", ""), max_length=200)
     status = data.get("status", "active")
+    if status not in {"active", "inactive"}:
+        return build_error_response("INVALID_PARAM", "账号状态无效", message_en="Invalid account status")
 
     if not email_addr:
         return build_error_response("ACCOUNT_EMAIL_REQUIRED", "邮箱不能为空", message_en="Email address is required")
+
+    existing_account_type = (existing_account.get("account_type") or "outlook").strip().lower()
+    original_client_id = (existing_account.get("client_id") or "").strip()
+    incoming_client_id = client_id.strip() if isinstance(client_id, str) else ""
+    incoming_refresh_token = refresh_token.strip() if isinstance(refresh_token, str) else ""
+    if (
+        existing_account_type == "outlook"
+        and incoming_client_id
+        and incoming_client_id != original_client_id
+        and not incoming_refresh_token
+    ):
+        return build_error_response(
+            "OUTLOOK_REFRESH_TOKEN_REQUIRED",
+            "修改 Outlook Client ID 时必须同时提供 Refresh Token",
+            message_en="Refresh token is required when updating the Outlook client ID",
+        )
 
     target_group = groups_repo.get_group_by_id(group_id)
     if not target_group:
@@ -1076,19 +1180,59 @@ def api_update_account(account_id: int) -> Any:
     return build_error_response("ACCOUNT_UPDATE_FAILED", "更新失败", message_en="Failed to update account", status=500)
 
 
+@login_required
+def api_update_account_remark(account_id: int) -> Any:
+    """轻量更新账号备注，仅修改 remark 字段。"""
+    data = request.json or {}
+    remark = sanitize_input(data.get("remark", ""), max_length=200)
+
+    update_result = accounts_repo.update_account_remark(account_id, remark)
+    if update_result is None:
+        return build_error_response("ACCOUNT_NOT_FOUND", "账号不存在", message_en="Account not found", status=404)
+    if update_result is False:
+        return build_error_response(
+            "ACCOUNT_REMARK_UPDATE_FAILED", "备注更新失败", message_en="Failed to update remark", status=500
+        )
+
+    log_audit(
+        "update_remark",
+        "account",
+        str(account_id),
+        json.dumps({"remark": remark}, ensure_ascii=False),
+    )
+    return jsonify(
+        {
+            "success": True,
+            "message": "备注更新成功",
+            "message_en": "Remark updated successfully",
+            "data": {
+                "id": update_result["id"],
+                "remark": update_result.get("remark", ""),
+                "updated_at": update_result.get("updated_at", ""),
+            },
+        }
+    )
+
+
 def _api_update_account_status(account_id: int, status: str) -> Any:
     """只更新账号状态"""
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in {"active", "inactive"}:
+        return build_error_response("INVALID_PARAM", "账号状态无效", message_en="Invalid account status")
+
     db = get_db()
     try:
-        db.execute(
+        cur = db.execute(
             """
             UPDATE accounts
             SET status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """,
-            (status, account_id),
+            (normalized_status, account_id),
         )
         db.commit()
+        if cur.rowcount == 0:
+            return build_error_response("ACCOUNT_NOT_FOUND", "账号不存在", message_en="Account not found", status=404)
         return jsonify({"success": True, "message": "状态更新成功"})
     except Exception:
         return build_error_response(
@@ -1387,6 +1531,8 @@ def api_search_accounts() -> Any:
                 "created_at": acc["created_at"] if acc["created_at"] else "",
                 "updated_at": acc["updated_at"] if acc["updated_at"] else "",
                 "tags": tags,
+                "telegram_push_enabled": bool(acc.get("telegram_push_enabled")),
+                "notification_enabled": bool(acc.get("telegram_push_enabled")),
                 "last_refresh_status": (last_refresh_log.get("status") if last_refresh_log else None),
                 "last_refresh_error": (last_refresh_log.get("error_message") if last_refresh_log else None),
             }
@@ -1644,7 +1790,10 @@ REFRESH_LOCK_NAME = "refresh_all_tokens"
 def api_refresh_account(account_id: int) -> Any:
     """刷新单个账号的 token"""
     db = get_db()
-    cursor = db.execute("SELECT id, email, client_id, refresh_token, group_id FROM accounts WHERE id = ?", (account_id,))
+    cursor = db.execute(
+        "SELECT id, email, client_id, refresh_token, group_id, account_type FROM accounts WHERE id = ?",
+        (account_id,),
+    )
     account = cursor.fetchone()
 
     if not account:
@@ -1661,6 +1810,16 @@ def api_refresh_account(account_id: int) -> Any:
     account_email = account["email"]
     client_id = account["client_id"]
     encrypted_refresh_token = account["refresh_token"]
+
+    if not refresh_service.is_refreshable_outlook_account(account["account_type"]):
+        return build_error_response(
+            "ACCOUNT_REFRESH_UNSUPPORTED",
+            "IMAP 账号不支持 Token 刷新",
+            message_en="IMAP accounts do not support token refresh",
+            err_type="UnsupportedOperationError",
+            status=400,
+            details=f"account_id={account_id}, account_type={account['account_type']}",
+        )
 
     # 获取分组代理设置
     proxy_url = ""
@@ -1979,7 +2138,8 @@ def api_telegram_toggle(account_id: int) -> Any:
         {
             "success": True,
             "enabled": enabled,
-            "message": f"Telegram推送已{action}",
-            "message_en": f"Telegram notification {'enabled' if enabled else 'disabled'}",
+            "notification_enabled": enabled,
+            "message": f"该邮箱通知参与已{action}",
+            "message_en": f"Mailbox notifications {'enabled' if enabled else 'disabled'}",
         }
     )

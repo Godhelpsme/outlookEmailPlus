@@ -152,8 +152,6 @@ def _configure_email_notification_job(scheduler, app) -> None:
     except Exception:
         pass
 
-    # 历史命名保留为 email_notification_job，避免外部调用方和测试 patch 点失效；
-    # 实际执行入口已经下沉为统一通知分发 Job，渠道选择由 notification_dispatch 内部决定。
     interval = _get_notification_dispatch_interval(app)
     scheduler.add_job(
         func=run_notification_dispatch_job,
@@ -298,8 +296,6 @@ def configure_scheduler_jobs(scheduler, app, test_refresh_token) -> None:
         misfire_grace_time=60,
     )
 
-    # PRD-00008 / Resolve 文档：恢复统一通知分发 Job，不再单独只挂 Telegram Job
-    # 统一通知分发 Job 内部会根据"账号是否开启通知 + 渠道是否启用"决定发送哪些渠道
     _configure_email_notification_job(scheduler, app)
     _configure_probe_poll_job(scheduler, app)
     _configure_pool_maintenance_jobs(scheduler)

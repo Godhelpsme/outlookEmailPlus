@@ -13,7 +13,7 @@ from outlook_web.repositories import groups as groups_repo
 from outlook_web.security.auth import get_external_api_consumer
 from outlook_web.services import graph as graph_service
 from outlook_web.services import imap as imap_service
-from outlook_web.services.imap_generic import get_email_detail_imap_generic, get_emails_imap_generic
+from outlook_web.services.imap_generic import get_email_detail_imap_generic_result, get_emails_imap_generic
 from outlook_web.services.verification_extractor import extract_email_text, extract_verification_info_with_options
 
 # Outlook IMAP 回退服务器（保持与内部接口一致）
@@ -71,6 +71,11 @@ class UpstreamReadFailedError(ExternalApiError):
 
 class EmailScopeForbiddenError(ExternalApiError):
     code = "EMAIL_SCOPE_FORBIDDEN"
+    status = 403
+
+
+class AccountAccessForbiddenError(ExternalApiError):
+    code = "ACCOUNT_ACCESS_FORBIDDEN"
     status = 403
 
 
@@ -218,12 +223,29 @@ def _preferred_probe_method(account: Dict[str, Any]) -> str:
 
 def _account_can_read(account: Dict[str, Any]) -> bool:
     status = (account.get("status") or "active").strip().lower()
-    if status == "disabled":
+    if status != "active":
         return False
     account_type = (account.get("account_type") or "outlook").strip().lower()
     if account_type == "imap":
         return bool((account.get("imap_host") or "").strip()) and bool((account.get("imap_password") or "").strip())
     return bool((account.get("client_id") or "").strip()) and bool((account.get("refresh_token") or "").strip())
+
+
+def can_account_read(account: Dict[str, Any]) -> bool:
+    return _account_can_read(account)
+
+
+def ensure_account_can_read(account: Dict[str, Any]) -> Dict[str, Any]:
+    if _account_can_read(account):
+        return account
+    raise AccountAccessForbiddenError(
+        "当前账号不可读取",
+        data={
+            "email": account.get("email") or "",
+            "status": account.get("status") or "",
+            "account_type": account.get("account_type") or "",
+        },
+    )
 
 
 def _probe_now_iso() -> str:
@@ -382,7 +404,7 @@ def _pick_instance_probe_account() -> Optional[Dict[str, Any]]:
 
 def probe_instance_upstream(*, cache_ttl_seconds: int = 60, force: bool = False) -> Dict[str, Any]:
     cached = get_upstream_probe_summary("instance", "__instance__")
-    if (not force) and (cached.get("last_probe_at") or ""):
+    if (not force) and _is_probe_summary_fresh(cached, cache_ttl_seconds):
         return cached
 
     account = _pick_instance_probe_account()
@@ -399,7 +421,7 @@ def list_messages_for_external(
     skip: int = 0,
     top: int = 20,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    account = require_account(email_addr)
+    account = ensure_account_can_read(require_account(email_addr))
     folder = (folder or "inbox").strip().lower() or "inbox"
     skip = max(0, int(skip or 0))
     top = max(1, min(int(top or 20), 50))
@@ -541,7 +563,7 @@ def get_message_detail_for_external(
     message_id: str,
     folder: str = "inbox",
 ) -> Dict[str, Any]:
-    account = require_account(email_addr)
+    account = ensure_account_can_read(require_account(email_addr))
     message_id = (message_id or "").strip()
     if not message_id:
         raise InvalidParamError("message_id 不能为空")
@@ -550,7 +572,7 @@ def get_message_detail_for_external(
     account_type = (account.get("account_type") or "outlook").strip().lower()
 
     if account_type == "imap":
-        detail = get_email_detail_imap_generic(
+        detail_result = get_email_detail_imap_generic_result(
             email_addr=email_addr,
             imap_password=account.get("imap_password", "") or "",
             imap_host=account.get("imap_host", "") or "",
@@ -559,8 +581,10 @@ def get_message_detail_for_external(
             folder=folder,
             provider=account.get("provider", "_default") or "_default",
         )
-        if not detail:
-            raise MailNotFoundError("未找到邮件详情", data={"email": email_addr, "message_id": message_id})
+        if not detail_result.get("success"):
+            error_payload = detail_result.get("error") or {}
+            raise UpstreamReadFailedError(str(error_payload.get("message") or "IMAP 读取失败"), data=error_payload)
+        detail = detail_result.get("email") or {}
 
         html_content = str(detail.get("body_html") or "")
         content = str(detail.get("body_text") or "") or extract_email_text({"body_html": html_content})
@@ -811,9 +835,7 @@ def create_probe(
     _validate_probe_params(email_addr, timeout_seconds, poll_interval)
 
     # 检查账号是否存在
-    account = accounts_repo.get_account_by_email(email_addr)
-    if not account:
-        raise AccountNotFoundError("指定邮箱账号不存在", data={"email": email_addr})
+    account = ensure_account_can_read(require_account(email_addr))
 
     probe_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc)

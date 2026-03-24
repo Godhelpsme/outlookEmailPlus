@@ -404,12 +404,12 @@ class V190NotificationSchemaRedTests(unittest.TestCase):
         cls.module = import_web_app_module()
         cls.app = cls.module.app
 
-    def test_schema_version_upgraded_to_13(self):
+    def test_schema_version_upgraded_to_14(self):
         conn = self.module.create_sqlite_connection()
         try:
             row = conn.execute("SELECT value FROM settings WHERE key = 'db_schema_version'").fetchone()
             self.assertIsNotNone(row)
-            self.assertEqual(str(row[0]), "13")
+            self.assertEqual(str(row[0]), "14")
         finally:
             conn.close()
 

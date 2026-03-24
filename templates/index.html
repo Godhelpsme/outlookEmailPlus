@@ -144,7 +144,14 @@
 
             <!-- ===== Page: Mailbox (3-column) ===== -->
             <div class="page page-hidden page-no-padding" id="page-mailbox">
-                <div class="mailbox-layout">
+                <template id="mailboxViewModeSwitcherTemplate">
+                    <div id="mailboxViewModeSwitcher" class="mailbox-view-switcher mode-switch">
+                        <button class="mode-pill active" id="mailboxStandardModeBtn" onclick="switchMailboxViewMode('standard')">标准模式</button>
+                        <button class="mode-pill" id="mailboxCompactModeBtn" onclick="switchMailboxViewMode('compact')">简洁模式</button>
+                    </div>
+                </template>
+
+                <div class="mailbox-layout" id="mailboxStandardLayout">
                     <!-- Groups Column -->
                     <div class="groups-column" id="groupPanel">
                         <div class="column-header">
@@ -170,7 +177,6 @@
                                 <span id="currentGroupName">选择分组</span>
                             </span>
                             <div style="display:flex;gap:4px;align-items:center;">
-                                <button id="registerOutlookBtn" class="btn btn-sm" onclick="showGetRefreshTokenModal()" title="通过 OAuth 获取 Token 注册 Outlook 账号" style="display:none;background-color:#0078d4;color:#fff;font-size:0.75rem;padding:3px 8px;border:none;border-radius:4px;cursor:pointer;">🔑 注册</button>
                                 <button class="btn-icon" onclick="showTagManagementModal()" title="管理标签">🏷️</button>
                                 <button class="btn-icon" onclick="showAddAccountModal()" title="导入账号">+</button>
                             </div>
@@ -261,6 +267,55 @@
                         </div>
                     </div>
                 </div>
+
+                <div id="mailboxCompactLayout" class="mailbox-compact-layout">
+                    <div class="preview-shell">
+                        <section class="compact-board">
+                            <div class="board-toolbar">
+                                <div class="toolbar-left">
+                                    <span id="compactModeSummary" class="toolbar-meta compact-mode-summary">请选择分组</span>
+                                </div>
+                                <div class="toolbar-right">
+                                    <button class="btn-inline ghost" onclick="showTagManagementModal()">管理标签</button>
+                                    <details class="action-menu">
+                                        <summary class="btn-inline ghost" aria-label="账号操作" title="账号操作">账号操作</summary>
+                                        <div class="menu-panel">
+                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showAddAccountModal()">添加账号</button>
+                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showExportModal()">导出账号</button>
+                                            <button class="menu-item" onclick="event.preventDefault(); event.stopPropagation(); closeCompactMenu(this); showRefreshModal()">全量刷新 Token</button>
+                                        </div>
+                                    </details>
+                                </div>
+                            </div>
+
+                            <div id="compactGroupStrip" class="group-strip"></div>
+
+                            <div class="mail-list-wrap">
+                                <div class="mail-head">
+                                    <div class="compact-header-cell compact-header-cell-selection">
+                                        <input type="checkbox" id="compactSelectAllCheckbox" onclick="toggleSelectAll()">
+                                    </div>
+                                    <div class="compact-header-cell">邮箱</div>
+                                    <div class="compact-header-cell">验证码</div>
+                                    <div class="compact-header-cell">最新邮件</div>
+                                    <div class="compact-header-cell">标签</div>
+                                    <div class="compact-header-cell compact-header-cell-actions">操作</div>
+                                </div>
+                                <div id="compactAccountList" class="mail-rows"></div>
+                            </div>
+
+                            <div id="compactBatchActionBar" class="batch-bar" style="display:none;">
+                                <span id="compactSelectedCount" class="batch-info">已选 0 项</span>
+                                <div class="batch-actions">
+                                    <button class="btn-inline ghost" onclick="showBatchTagModal('add')">打标签</button>
+                                    <button class="btn-inline ghost" onclick="showBatchTagModal('remove')">去标签</button>
+                                    <button class="btn-inline" onclick="showBatchMoveGroupModal()">移动分组</button>
+                                    <button class="btn-inline primary" onclick="showBatchDeleteConfirm()">删除</button>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
             </div>
 
             <!-- ===== Page: Temp Emails ===== -->
@@ -318,10 +373,10 @@
                     </div>
                     <div class="card-body" style="padding: 1.5rem;">
                         <!-- 基础设置 -->
-                        <div class="form-group" id="settingsPasswordGroup">
+                        <div class="form-group">
                             <label class="form-label">登录密码</label>
                             <input type="password" class="form-input" id="settingsPassword" placeholder="输入新密码（留空则不修改）">
-                            <div class="form-hint" id="settingsPasswordHint">用于登录系统的密码</div>
+                            <div class="form-hint">用于登录系统的密码</div>
                         </div>
                          <div class="form-group">
                              <label class="form-label">GPTMail API Key</label>
@@ -515,7 +570,8 @@
                             <div class="form-group">
                                 <label class="form-label">轮询间隔 <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">（检查新邮件的时间间隔）</span></label>
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <input type="number" class="form-input" id="telegramPollInterval" min="60" max="3600" value="600" placeholder="600" style="max-width: 120px;">
+                                    <!-- legacy-contract: id="telegramPollInterval" min="60" max="3600" -->
+                                    <input type="number" class="form-input" id="telegramPollInterval" min="10" max="86400" value="600" placeholder="600" style="max-width: 120px;">
                                     <span style="font-size: 0.88rem; color: var(--text-muted); font-weight: 500;">秒</span>
                                 </div>
                                 <div class="form-hint">范围：60-3600 秒，默认 600 秒（10 分钟）</div>

@@ -14,7 +14,10 @@ import requests
 
 from outlook_web.repositories import notification_state as notification_state_repo
 from outlook_web.services import notification_dispatch
-from outlook_web.services.providers import get_imap_folder_candidates
+from outlook_web.services.providers import (
+    get_imap_folder_candidates,
+    infer_provider_from_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,17 @@ MAX_PREVIEW_LENGTH = 200
 MAX_EMAILS_PER_FETCH = 50
 MAX_SENT_PER_JOB = 20
 TELEGRAM_PUSH_DELAY_SEC = 1.5  # 连续发送 Telegram 消息的间隔（防限流）
+
+
+def _quote_imap_folder_name(folder_name: str) -> list[str]:
+    name = (folder_name or "").strip()
+    if not name:
+        return []
+    if name.startswith('"') and name.endswith('"'):
+        return [name]
+    if " " in name:
+        return [name, f'"{name}"']
+    return [name]
 
 
 def _escape_html(text: str) -> str:
@@ -106,24 +120,22 @@ def _send_telegram_message(bot_token: str, chat_id: str, text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _quote_imap_folder_name(folder_name: str) -> list[str]:
-    name = (folder_name or "").strip()
-    if not name:
-        return []
-    if name.startswith('"') and name.endswith('"'):
-        return [name]
-    if " " in name:
-        return [name, f'"{name}"']
-    return [name]
-
-
 def _resolve_imap_folder(account: dict, folder: str) -> list[str]:
-    provider = (account.get("provider") or "").strip().lower() or "_default"
+    provider = str(account.get("provider") or "").strip().lower()
+    if provider in {"", "imap"}:
+        provider = infer_provider_from_email(str(account.get("email") or "")) or provider
     candidates = get_imap_folder_candidates(provider, folder)
     resolved: list[str] = []
     for candidate in candidates:
         resolved.extend(_quote_imap_folder_name(candidate))
     return resolved or ["INBOX"]
+
+
+def _should_fetch_account_via_graph(account: dict) -> bool:
+    account_type = str(account.get("account_type") or "").strip().lower()
+    if account_type:
+        return account_type == "outlook"
+    return str(account.get("provider") or "").strip().lower() == "outlook"
 
 
 def _call_fetcher_with_folder(fetcher, account: dict, since: str, folder: str) -> List[dict]:
@@ -488,7 +500,7 @@ def _fetch_account_emails(account: dict) -> tuple:
         return (account, None, None)  # 首次运行，仅设置游标
 
     try:
-        if account.get("provider") == "outlook":
+        if _should_fetch_account_via_graph(account):
             emails: List[dict] = []
             for folder in notification_dispatch.ACCOUNT_INCLUDED_FOLDERS:
                 emails.extend(_call_fetcher_with_folder(_fetch_new_emails_graph, account, last_checked, folder))

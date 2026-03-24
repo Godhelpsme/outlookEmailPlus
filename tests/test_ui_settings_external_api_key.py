@@ -43,6 +43,17 @@ class ExternalApiKeySettingsUITests(unittest.TestCase):
         self.assertIn("settingsExternalApiKeysJson", js)
         self.assertIn("dataset.maskedValue", js)
 
+    def test_main_js_preserves_pool_access_and_telegram_poll_interval_contract(self):
+        client = self.app.test_client()
+        self._login(client)
+
+        _, js = self._get_text(client, "/static/js/main.js")
+        _, html = self._get_text(client, "/")
+        self.assertIn("pool_access:", js)
+        self.assertIn("item.pool_access === true", js)
+        self.assertIn("Telegram 轮询间隔必须在 10-86400 秒之间", js)
+        self.assertIn('id="telegramPollInterval" min="10" max="86400"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

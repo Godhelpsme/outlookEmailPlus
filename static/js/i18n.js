@@ -34,6 +34,7 @@
         '退出登录': 'Logout',
         '系统概览': 'System overview',
         '管理邮箱账号与查看邮件': 'Manage accounts and read emails',
+        '按分组查看账号摘要与验证码': 'View account summaries and verification codes by group',
         '创建和管理临时邮箱': 'Create and manage temp mailboxes',
         'Token 刷新历史记录': 'Token refresh history',
         '配置系统参数': 'Configure system settings',
@@ -50,8 +51,13 @@
         '选择分组': 'Select a group',
         '管理标签': 'Manage tags',
         '导入账号': 'Import Accounts',
+        '添加账号': 'Add Account',
+        '导出账号': 'Export Accounts',
+        '标准模式': 'Standard Mode',
+        '简洁模式': 'Compact Mode',
         '📤 导出': '📤 Export',
         '🔄 全量刷新 Token': '🔄 Refresh All Tokens',
+        '全量刷新 Token': 'Refresh All Tokens',
         '＋ 添加账号': '＋ Add Account',
         '＋ 创建邮箱': '＋ Create Mailbox',
         '+ 创建': '+ Create',
@@ -64,17 +70,19 @@
         '成功账号数': 'Successful accounts',
         '失败账号数': 'Failed accounts',
         '邮箱名': 'Email',
+        '邮箱': 'Email',
         '全选': 'Select All',
+        '选择': 'Select',
         '请从左侧选择一个分组': 'Select a group from the left',
         '打标签': 'Add Tags',
         '去标签': 'Remove Tags',
         '移动分组': 'Move Group',
         '删除': 'Delete',
-        '🗑️ 删除': '🗑️ Delete',
+        '删除账号': 'Delete Account',
         '编辑': 'Edit',
         '复制': 'Copy',
+        '复制邮箱': 'Copy Email',
         '保存': 'Save',
-        '清空': 'Clear',
         '导入': 'Import',
         '成功': 'Success',
         '失败': 'Failed',
@@ -86,23 +94,50 @@
         '📨 收件箱': '📨 Inbox',
         '⚠️ 垃圾邮件': '⚠️ Junk Email',
         '获取邮件': 'Fetch Emails',
-        '🔄 获取邮件': '🔄 Fetch Emails',
+        '最新邮件': 'Latest Email',
+        '标签': 'Tags',
+        '操作': 'Actions',
+        '更多操作': 'More Actions',
+        '账号操作': 'Account Actions',
+        '拉取': 'Fetch',
+        '拉取中...': 'Fetching...',
+        '拉取中…': 'Fetching...',
+        '请选择分组': 'Select a group',
+        '暂无可用分组': 'No groups available',
+        '当前分组暂无账号': 'No accounts in this group',
+        '未填写说明': 'No description',
+        '暂无邮件摘要': 'No email summary yet',
+        '暂无': 'N/A',
+        '复制验证码': 'Copy Verification Code',
+        '提取验证码': 'Extract Verification Code',
+        '编辑便签': 'Edit Note',
+        '编辑备注': 'Edit Remark',
+        '单独编辑备注': 'Edit Remark Only',
+        '账号': 'Account',
+        '保存备注': 'Save Remark',
+        '支持新增、修改和清空': 'Supports adding, editing, and clearing',
+        '复制当前摘要验证码': 'Copy current verification code',
+        '无摘要码时兜底提取验证码': 'Extract a verification code when no summary code is available',
+        '未找到账号摘要': 'Account summary not found',
+        '未找到账号': 'Account not found',
+        '部分拉取完成，账号摘要已刷新': 'Fetch completed with partial failures. Account summary updated',
+        '账号摘要已刷新': 'Account summary updated',
+        '刷新账号摘要失败': 'Failed to refresh account summary',
+        '复制验证码失败': 'Failed to copy verification code',
+        '加载失败，请重试': 'Load failed. Please try again.',
         '当前邮箱：': 'Current mailbox:',
         '点击复制邮箱地址': 'Click to copy email address',
         '访问 GitHub 仓库': 'Open the GitHub repository',
+        '处理建议': 'Suggestions',
+        '备注支持单独保存，不会连带修改账号凭据等其他字段。': 'Remarks can be saved separately without changing credentials or other account fields.',
+        '这里会调用轻量 PATCH 接口，只更新备注本身。': 'This uses a lightweight PATCH endpoint and updates only the remark field.',
         '已选 0 项': '0 selected',
         '返回': 'Back',
         '全屏查看': 'Fullscreen',
-        '🔍 全屏查看': '🔍 Fullscreen',
         '验证码': 'Verification',
         '🔑 验证码': '🔑 Verification',
-        '提取验证码': 'Extract Verification',
         '信任此邮件': 'Trust this email',
         '选择一封邮件查看详情': 'Select an email to view details',
-        '发件人': 'From',
-        '收件人': 'To',
-        '抄送': 'Cc',
-        '时间': 'Time',
         '无主题': 'No Subject',
         '创建': 'Create',
         '创建第一个临时邮箱': 'Create the first temp mailbox',
@@ -196,8 +231,6 @@
         '建议设置为 30 天，防止 Token 因 90 天不使用而过期': 'Recommended: 30 days to prevent token expiration after 90 days of inactivity.',
         '建议设置为 5-10 秒，避免频繁请求触发 API 限流': 'Recommended: 5-10 seconds to avoid triggering API rate limits with frequent requests.',
         '输入新密码（留空则不修改）': 'Enter a new password (leave blank to keep unchanged)',
-        '当前站点已禁用修改登录密码': 'Login password changes are disabled on this site',
-        '演示站点可通过环境变量禁止在设置页修改登录密码': 'This demo site disables login password changes via an environment variable.',
         '输入 GPTMail API Key': 'Enter the GPTMail API key',
         '用于 /api/external/* 的 X-API-Key': 'Used as the X-API-Key for /api/external/*',
         '用于对外开放接口鉴权（请求头：X-API-Key）。如需禁用对外开放接口，可清空后保存。': 'Used to authorize external APIs with the X-API-Key header. Clear it and save to disable external APIs.',
@@ -268,8 +301,6 @@
         '已在新窗口打开授权页面': 'Authorization page opened in a new window',
         '请先粘贴授权后的完整 URL': 'Please paste the full redirected URL first',
         '✅ Token 获取成功！请将邮箱和密码替换后点导入': 'Token received. Replace the email and password, then import.',
-        '换取 Token': 'Exchange Token',
-        '⏳ 换取中...': '⏳ Exchanging...',
         '加载设置失败': 'Failed to load settings',
         '多 Key 配置必须是合法 JSON': 'Multiple API keys must be valid JSON',
         '多 Key 配置必须是 JSON 数组': 'Multiple API keys must be a JSON array',
@@ -304,7 +335,6 @@
         '标签已删除': 'Tag deleted',
         '删除失败': 'Delete failed',
         '操作失败': 'Operation failed',
-        '删除标签失败': 'Failed to delete tag',
         '请选择目标分组': 'Please select a target group',
         '暂无分组': 'No groups yet',
         '暂无刷新记录': 'No refresh records yet',
@@ -355,8 +385,6 @@
         '重试': 'Retry',
         '重试中...': 'Retrying...',
         '正在重试失败的账号...': 'Retrying failed accounts...',
-        '隐藏列表': 'Hide List',
-        '显示列表': 'Show List',
         '轮询中': 'Polling',
         '是否停止轮询？': 'Stop polling?',
         '刷新中...': 'Refreshing...',
@@ -370,9 +398,6 @@
         '秒后继续...': 'seconds before continuing...',
         '请输入有效的十六进制颜色（如 #FF5500）': 'Please enter a valid hexadecimal color such as #FF5500',
         '换取 Token 失败': 'Failed to exchange token',
-        '搜索中…': 'Searching...',
-        '搜索失败': 'Search failed',
-        '搜索失败，请重试': 'Search failed. Please try again.',
         '请选择要导出的分组': 'Please select the groups to export',
         '支持混合格式，每行一个账号...\nOutlook: 邮箱----密码----client_id----refresh_token\nIMAP: 邮箱----授权码----provider\n或: 邮箱----密码（自动识别类型）\nGPTMail: 仅邮箱地址': 'Mixed formats are supported, one account per line...\nOutlook: email----password----client_id----refresh_token\nIMAP: email----app-password----provider\nOr: email----password (auto-detect type)\nGPTMail: email only',
         '智能识别模式：自动按每行格式和邮箱域名判断类型，自动分组': 'Smart detection mode: identify account type by line format and email domain, then group automatically',
@@ -384,6 +409,7 @@
         '邮箱----IMAP授权码/应用密码': 'email----IMAP app password',
         '导入邮箱账号': 'Import Mail Accounts',
         '默认分组': 'Default Group',
+        '未分组的邮箱': 'Ungrouped Mailboxes',
         '🔑 注册': '🔑 Register',
         '🔑 获取 Token': '🔑 Get Token',
         '获取 Token': 'Get Token',
@@ -436,16 +462,14 @@
         '导出文件包含敏感信息（Refresh Token），请妥善保管': 'The export file contains sensitive information (Refresh Token). Keep it secure',
         '确认导出': 'Confirm Export',
         'Token 刷新管理': 'Token Refresh Manager',
-        '🔄 Token 刷新管理': '🔄 Token Refresh Manager',
+        '令牌刷新管理': 'Token Refresh Manager',
         '刷新统计': 'Refresh Summary',
         '上次全量刷新': 'Last full refresh',
         '总邮箱数': 'Total mailboxes',
         '成功邮箱': 'Successful mailboxes',
         '失败邮箱': 'Failed mailboxes',
         '全量刷新': 'Refresh All',
-        '🔄 全量刷新': '🔄 Refresh All',
         '重试失败': 'Retry Failed',
-        '🔁 重试失败': '🔁 Retry Failed',
         '失败邮箱': 'Failed Mailboxes',
         '刷新历史': 'Refresh History',
         '手动': 'Manual',
@@ -456,7 +480,6 @@
         '当前失败状态的邮箱': 'Mailboxes currently in failed state',
         '隐藏': 'Hide',
         '全量刷新历史': 'Full Refresh History',
-        '暂无失败状态的邮箱': 'No failed mailboxes',
         '请从左侧选择一个邮箱账号': 'Select an email account from the left',
         '选择一个临时邮箱查看邮件': 'Select a temp mailbox to view messages',
         '该分组暂无邮箱': 'No mailboxes in this group',
@@ -471,7 +494,6 @@
         '推送': 'Notifications',
         '🔔 推送': '🔔 Notifications',
         '点击关闭推送': 'Click to disable notifications',
-        '点击复制': 'Click to copy',
         '暂无审计记录': 'No audit logs yet',
         '加载审计日志失败': 'Failed to load audit logs',
         '标签名称': 'Tag Name',
@@ -485,9 +507,7 @@
         '近半年刷新历史（共': 'Refresh history for the last six months (total ',
         '查看错误': 'View error',
         '点击关闭推送': 'Click to disable notifications',
-        '移动到分组': 'Move to Group',
-        '未设置（设置后可通过 /api/external/* 对外开放接口读取邮件与验证码）': 'Not configured yet. After saving, /api/external/* can expose emails and verification codes.',
-        '⚠️ 警告：启用信任模式将直接显示邮件原始内容，不进行任何安全过滤。\n\n这可能包含恶意脚本或不安全的内容。您确定要继续吗？': '⚠️ Warning: Trust mode shows the raw email content without any safety filtering.\n\nThis may include malicious scripts or unsafe content. Do you want to continue?'
+        '移动到分组': 'Move to Group'
     };
 
     const reverseMap = Object.fromEntries(
@@ -513,11 +533,7 @@
         { zh: /^重试完成！成功: (\d+), 失败: (\d+)$/, en: 'Retry completed. Success: $1, Failed: $2' },
         { zh: /^账号：(.+)$/, en: 'Account: $1' },
         { zh: /^临时邮箱已生成: (.+)$/, en: 'Temp mailbox created: $1' },
-        { zh: /^(.+) \(临时\)$/, en: '$1 (Temp)' },
-        { zh: /^当前已配置 (\d+) 个多 Key。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。$/, en: '$1 API keys configured. Keeping a masked api_key leaves it unchanged; saving an empty value clears all multi-key entries.' },
         { zh: /^当前邮箱：(.+)$/, en: 'Current mailbox: $1' },
-        { zh: /^搜索结果 \((\d+)\)$/, en: 'Search Results ($1)' },
-        { zh: /^近半年刷新历史（共 (\d+) 条）$/, en: 'Refresh history for the last six months (total $1)' },
         { zh: /^确认删除账号 (.+)\?$/, en: 'Delete account $1?' },
         { zh: /^确定要删除账号 (.+) 吗？$/, en: 'Delete account $1?' },
         { zh: /^确定要删除临时邮箱 (.+) 吗？\n该邮箱的所有邮件也将被删除。$/, en: 'Delete temp mailbox $1?\nAll messages in this mailbox will also be deleted.' },
@@ -551,11 +567,7 @@
         { en: /^Retry completed\. Success: (\d+), Failed: (\d+)$/, zh: '重试完成！成功: $1, 失败: $2' },
         { en: /^Account: (.+)$/, zh: '账号：$1' },
         { en: /^Temp mailbox created: (.+)$/, zh: '临时邮箱已生成: $1' },
-        { en: /^(.+) \(Temp\)$/, zh: '$1 (临时)' },
-        { en: /^(\d+) API keys configured\. Keeping a masked api_key leaves it unchanged; saving an empty value clears all multi-key entries\.$/, zh: '当前已配置 $1 个多 Key。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。' },
         { en: /^Current mailbox: (.+)$/, zh: '当前邮箱：$1' },
-        { en: /^Search Results \((\d+)\)$/, zh: '搜索结果 ($1)' },
-        { en: /^Refresh history for the last six months \(total (\d+)\)$/, zh: '近半年刷新历史（共 $1 条）' },
         { en: /^Delete account (.+)\?$/, zh: '确定要删除账号 $1 吗？' },
         { en: /^Delete temp mailbox (.+)\?\nAll messages in this mailbox will also be deleted\.$/, zh: '确定要删除临时邮箱 $1 吗？\n该邮箱的所有邮件也将被删除。' },
         { en: /^Clear all messages in temp mailbox (.+)\?$/, zh: '确定要清空临时邮箱 $1 的所有邮件吗？' },
@@ -576,6 +588,7 @@
     function setLanguage(language) {
         localStorage.setItem(STORAGE_KEY, language === 'en' ? 'en' : 'zh');
         applyLanguage();
+        window.dispatchEvent(new CustomEvent('ui-language-changed', { detail: { language: getLanguage() } }));
     }
 
     function translateByPattern(text, items, targetKey) {
@@ -614,12 +627,28 @@
         if (!value) {
             return;
         }
-        // 运行时翻译必须保持幂等；只有结果真的变化时才回写，
-        // 否则 MutationObserver 会因为属性再次被设置而反复触发。
-        const translated = translateAppText(value);
-        if (translated !== value) {
-            element.setAttribute(attrName, translated);
+        element.setAttribute(attrName, translateAppText(value));
+    }
+
+    const I18N_SKIP_SELECTORS = [
+        '#emailList',
+        '#emailDetail',
+        '#accountList',
+        '#compactAccountList',
+        '#refreshLogContainer',
+        '#auditLogContainer',
+        '#tempEmailContainer',
+        '#fullscreenEmailContent'
+    ];
+
+    function isInI18nSkipScope(element) {
+        if (!element || typeof element.closest !== 'function') {
+            return false;
         }
+        if (element.closest('[data-i18n-skip]')) {
+            return true;
+        }
+        return I18N_SKIP_SELECTORS.some((selector) => element.closest(selector));
     }
 
     function translateNode(root) {
@@ -629,11 +658,11 @@
 
         if (root.nodeType === Node.TEXT_NODE) {
             const value = root.nodeValue;
+            if (!root.parentElement || isInI18nSkipScope(root.parentElement)) {
+                return;
+            }
             if (value && value.trim()) {
-                const translated = translateAppText(value);
-                if (translated !== value) {
-                    root.nodeValue = translated;
-                }
+                root.nodeValue = translateAppText(value);
             }
             return;
         }
@@ -642,44 +671,52 @@
             return;
         }
 
-        // 动态文案既可能在文本节点里，也可能挂在 placeholder/title/aria-label/value 上。
+        if (isInI18nSkipScope(root)) {
+            return;
+        }
+
         translateAttribute(root, 'placeholder');
         translateAttribute(root, 'title');
         translateAttribute(root, 'aria-label');
         if (root.tagName === 'INPUT' && root.type === 'button' && root.value) {
-            const translatedValue = translateAppText(root.value);
-            if (translatedValue !== root.value) {
-                root.value = translatedValue;
-            }
+            root.value = translateAppText(root.value);
         }
         root.querySelectorAll('[placeholder],[title],[aria-label],input[type="button"][value]').forEach((element) => {
+            if (isInI18nSkipScope(element)) {
+                return;
+            }
             translateAttribute(element, 'placeholder');
             translateAttribute(element, 'title');
             translateAttribute(element, 'aria-label');
             if (element.tagName === 'INPUT' && element.type === 'button' && element.value) {
-                const translatedValue = translateAppText(element.value);
-                if (translatedValue !== element.value) {
-                    element.value = translatedValue;
-                }
+                element.value = translateAppText(element.value);
             }
         });
 
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-        const textNodes = [];
-        while (walker.nextNode()) {
-            textNodes.push(walker.currentNode);
-        }
-        textNodes.forEach((node) => {
-            if (!node.parentElement || ['SCRIPT', 'STYLE'].includes(node.parentElement.tagName)) {
-                return;
-            }
-            if (node.nodeValue && node.nodeValue.trim()) {
-                const translated = translateAppText(node.nodeValue);
-                if (translated !== node.nodeValue) {
-                    node.nodeValue = translated;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                if (!node || !node.nodeValue || !node.nodeValue.trim()) {
+                    return NodeFilter.FILTER_REJECT;
                 }
+                if (!node.parentElement) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                if (['SCRIPT', 'STYLE'].includes(node.parentElement.tagName)) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                if (isInI18nSkipScope(node.parentElement)) {
+                    return NodeFilter.FILTER_REJECT;
+                }
+                return NodeFilter.FILTER_ACCEPT;
             }
         });
+        while (walker.nextNode()) {
+            try {
+                walker.currentNode.nodeValue = translateAppText(walker.currentNode.nodeValue);
+            } catch (error) {
+                // ignore broken nodes
+            }
+        }
     }
 
     function updateSwitcherState() {
@@ -816,34 +853,21 @@
     function observeMutations() {
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
-                // childList 负责新插入节点；characterData/attributes 负责运行时改写的已有节点。
-                if (mutation.type === 'childList') {
-                    mutation.addedNodes.forEach((node) => translateNode(node));
-                    return;
-                }
-                if (mutation.type === 'characterData') {
-                    translateNode(mutation.target);
-                    return;
-                }
-                if (mutation.type === 'attributes' && mutation.target) {
-                    if (mutation.attributeName === 'value' && mutation.target.tagName === 'INPUT' && mutation.target.type === 'button') {
-                        const translatedValue = translateAppText(mutation.target.value);
-                        if (translatedValue !== mutation.target.value) {
-                            mutation.target.value = translatedValue;
-                        }
-                    } else if (mutation.attributeName) {
-                        translateAttribute(mutation.target, mutation.attributeName);
+                mutation.addedNodes.forEach((node) => {
+                    if (!node) {
+                        return;
                     }
-                }
+                    if (node.nodeType === Node.ELEMENT_NODE && isInI18nSkipScope(node)) {
+                        return;
+                    }
+                    if (node.nodeType === Node.TEXT_NODE && node.parentElement && isInI18nSkipScope(node.parentElement)) {
+                        return;
+                    }
+                    translateNode(node);
+                });
             });
         });
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-            characterData: true,
-            attributes: true,
-            attributeFilter: ['placeholder', 'title', 'aria-label', 'value']
-        });
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
     const nativeConfirm = window.confirm.bind(window);

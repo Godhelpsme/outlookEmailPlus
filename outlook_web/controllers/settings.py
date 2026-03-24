@@ -192,8 +192,8 @@ def api_get_settings() -> Any:
     safe_settings["telegram_poll_interval"] = _coerce_int_range(
         all_settings.get("telegram_poll_interval", "600") or "600",
         600,
-        minimum=60,
-        maximum=3600,
+        minimum=10,
+        maximum=86400,
     )
 
     response = {"success": True, "settings": safe_settings}
@@ -248,10 +248,6 @@ def api_update_settings() -> Any:
         target_email_notification_recipient = str(data.get("email_notification_recipient") or "").strip()
 
     if "email_notification_enabled" in data or "email_notification_recipient" in data:
-        # 邮件通知配置不只是保存到 settings：
-        # 1. recipient 会影响统一通知 Job 的轮询间隔选择
-        # 2. 从关闭 -> 开启时需要补建 email cursor，避免首次启动重扫历史邮件
-        # 3. 因此开关和收件人变更都必须进入同一条 reload 链路
         if target_email_notification_enabled and not target_email_notification_recipient:
             return _json_error(
                 "EMAIL_NOTIFICATION_RECIPIENT_REQUIRED",
@@ -276,17 +272,12 @@ def api_update_settings() -> Any:
                     details=exc.details,
                 )
         if "email_notification_enabled" in data:
-            queue_setting_update(
-                "email_notification_enabled",
-                "true" if target_email_notification_enabled else "false",
-            )
+            queue_setting_update("email_notification_enabled", "true" if target_email_notification_enabled else "false")
             updated.append("邮件通知开关")
-            # PRD-00008 / Resolve 文档：邮件通知设置变更需触发调度器重载
             scheduler_reload_needed = True
         if "email_notification_recipient" in data:
             queue_setting_update("email_notification_recipient", target_email_notification_recipient)
             updated.append("邮件通知接收邮箱")
-            # PRD-00008 / Resolve 文档：收件人变更也需重载调度器（影响轮询间隔选择）
             scheduler_reload_needed = True
 
     # 更新登录密码
@@ -663,8 +654,6 @@ def api_update_settings() -> Any:
             try:
                 from outlook_web.services import notification_dispatch
 
-                # 首次启用邮件通知时先初始化 channel cursor，
-                # 避免下一轮调度把存量历史邮件当成“新邮件”整批补发。
                 notification_dispatch.bootstrap_channel_cursors(notification_dispatch.CHANNEL_EMAIL)
             except Exception:
                 pass

@@ -31,6 +31,18 @@ class TestDetectLineType(unittest.TestCase):
         self.assertEqual(r["type"], "outlook")
         self.assertEqual(r["fields"]["refresh_token"], "part1----part2----part3")
 
+    def test_imap_4_parts_host_port_detected_as_custom(self):
+        r = self._detect("user@corp.com----pwd123----imap.corp.com----993")
+        self.assertEqual(r["type"], "imap")
+        self.assertEqual(r["provider"], "custom")
+        self.assertEqual(r["fields"]["imap_host"], "imap.corp.com")
+        self.assertEqual(r["fields"]["imap_port"], 993)
+
+    def test_imap_4_parts_invalid_port_returns_error_instead_of_outlook(self):
+        r = self._detect("user@corp.com----pwd123----imap.corp.com----99999")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("端口", r["error"])
+
     # --- Custom 5 段 ---
     def test_custom_5_parts(self):
         r = self._detect("user@corp.com----pwd123----custom----mail.corp.com----993")
@@ -43,6 +55,21 @@ class TestDetectLineType(unittest.TestCase):
         r = self._detect("u@c.com----p----Custom----h.com----995")
         self.assertEqual(r["type"], "imap")
         self.assertEqual(r["provider"], "custom")
+
+    def test_custom_5_parts_outlook_domain_requires_oauth(self):
+        r = self._detect("user@outlook.com----pwd123----custom----mail.corp.com----993")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
+
+    def test_custom_5_parts_invalid_port_returns_error(self):
+        r = self._detect("user@corp.com----pwd123----custom----mail.corp.com----99999")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("端口", r["error"])
+
+    def test_imap_4_parts_outlook_domain_requires_oauth(self):
+        r = self._detect("user@outlook.com----pwd123----imap.corp.com----993")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
 
     # --- IMAP 3 段 ---
     def test_imap_3_parts_known_provider(self):
@@ -60,12 +87,37 @@ class TestDetectLineType(unittest.TestCase):
         r = self._detect("u@x.com----p----custom")
         self.assertEqual(r["type"], "error")
 
+    def test_imap_3_parts_outlook_requires_oauth(self):
+        r = self._detect("user@outlook.com----plain-password----outlook")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
+
     # --- 2 段：域名推断 ---
     def test_2_parts_gmail_inferred(self):
         r = self._detect("user@gmail.com----apppassword")
         self.assertEqual(r["type"], "imap")
         self.assertEqual(r["provider"], "gmail")
         self.assertEqual(r["fields"]["imap_host"], "imap.gmail.com")
+
+    def test_2_parts_outlook_requires_oauth(self):
+        r = self._detect("user@outlook.com----plain-password")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
+
+    def test_2_parts_hotmail_requires_oauth(self):
+        r = self._detect("user@hotmail.com----plain-password")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
+
+    def test_2_parts_live_requires_oauth(self):
+        r = self._detect("user@live.com----plain-password")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
+
+    def test_2_parts_live_cn_requires_oauth(self):
+        r = self._detect("user@live.cn----plain-password")
+        self.assertEqual(r["type"], "error")
+        self.assertIn("OAuth", r["error"])
 
     def test_2_parts_unknown_with_fallback(self):
         r = self._detect("user@corp.com----pwd", fallback_host="mail.corp.com", fallback_port=995)

@@ -133,6 +133,23 @@ def _quote_if_needed(folder_name: str) -> List[str]:
     return [name]
 
 
+def _is_outlook_imap_target(provider: str, imap_host: str) -> bool:
+    provider_key = (provider or "").strip().lower()
+    host = (imap_host or "").strip().lower()
+    return provider_key == "outlook" or host in {"outlook.live.com", "outlook.office365.com"}
+
+
+def _normalize_imap_auth_error_message(raw_message: str, *, provider: str, imap_host: str) -> str:
+    message = sanitize_error_details(str(raw_message or "")).strip() or "IMAP 认证失败"
+    provider_key = (provider or "").strip().lower()
+    if provider_key == "gmail":
+        return "IMAP 认证失败：Gmail 通常需要“应用专用密码”（非登录密码），并在 Gmail 设置中开启 IMAP"
+    lowered = message.lower()
+    if _is_outlook_imap_target(provider, imap_host) and "basicauthblocked" in lowered:
+        return "IMAP 认证失败：Outlook.com 已阻止 Basic Auth（账号密码直连），请改用 Outlook OAuth 导入（client_id + refresh_token）"
+    return message
+
+
 def _resolve_imap_folder(
     mail: imaplib.IMAP4_SSL,
     candidates: List[str],
@@ -211,8 +228,13 @@ def get_emails_imap_generic(
     错误时返回：
     {
       "success": False,
-      "error": "<脱敏消息>",
-      "error_code": "IMAP_AUTH_FAILED|IMAP_CONNECT_FAILED|IMAP_FOLDER_NOT_FOUND"
+      "error": {
+        "code": "IMAP_AUTH_FAILED|IMAP_CONNECT_FAILED|IMAP_FOLDER_NOT_FOUND|IMAP_SEARCH_FAILED",
+        "message": "...",
+        "status": 400|401|502,
+        ...
+      },
+      "error_code": "IMAP_AUTH_FAILED|IMAP_CONNECT_FAILED|IMAP_FOLDER_NOT_FOUND|IMAP_CONNECT_FAILED(兼容字段)"
     }
     """
     mail = None
@@ -225,14 +247,10 @@ def get_emails_imap_generic(
             mail.login(email_addr, imap_password)
             _LOGGER.info("imap_login_ok email=%s provider=%s", email_addr, provider)
         except imaplib.IMAP4.error as e:
+            message = _normalize_imap_auth_error_message(str(e), provider=provider, imap_host=imap_host)
             _LOGGER.warning(
-                "imap_login_failed email=%s provider=%s err=%s", email_addr, provider, sanitize_error_details(str(e))
+                "imap_login_failed email=%s provider=%s err=%s", email_addr, provider, message
             )
-            message = sanitize_error_details(str(e)) or "IMAP 认证失败"
-            provider_key = (provider or "").strip().lower()
-            if provider_key == "gmail":
-                message = "IMAP 认证失败：Gmail 通常需要“应用专用密码”（非登录密码），并在 Gmail 设置中开启 IMAP"
-
             return {
                 "success": False,
                 "error": build_error_payload(
@@ -376,7 +394,7 @@ def get_emails_imap_generic(
                 pass
 
 
-def get_email_detail_imap_generic(
+def get_email_detail_imap_generic_result(
     email_addr: str,
     imap_password: str,
     imap_host: str,
@@ -384,10 +402,19 @@ def get_email_detail_imap_generic(
     message_id: str = "",
     folder: str = "inbox",
     provider: str = "_default",
-) -> Optional[Dict[str, Any]]:
-    """标准 IMAP 邮件详情（按 UID fetch），失败返回 None。"""
+) -> Dict[str, Any]:
+    """标准 IMAP 邮件详情（按 UID fetch），失败返回结构化错误。"""
     if not message_id:
-        return None
+        return {
+            "success": False,
+            "error": build_error_payload(
+                "EMAIL_DETAIL_INVALID",
+                "message_id 不能为空",
+                "ValidationError",
+                400,
+                "",
+            ),
+        }
 
     mail = None
     try:
@@ -396,19 +423,50 @@ def get_email_detail_imap_generic(
             mail.login(email_addr, imap_password)
             _LOGGER.info("imap_detail_login_ok email=%s uid=%s", email_addr, message_id)
         except imaplib.IMAP4.error as e:
-            _LOGGER.warning("imap_detail_login_failed email=%s err=%s", email_addr, sanitize_error_details(str(e)))
-            return None
+            message = _normalize_imap_auth_error_message(str(e), provider=provider, imap_host=imap_host)
+            _LOGGER.warning("imap_detail_login_failed email=%s err=%s", email_addr, message)
+            return {
+                "success": False,
+                "error": build_error_payload(
+                    "IMAP_AUTH_FAILED",
+                    message,
+                    "IMAPAuthError",
+                    401,
+                    "",
+                ),
+                "error_code": "IMAP_AUTH_FAILED",
+            }
 
         candidates = get_imap_folder_candidates(provider, folder)
         selected = _resolve_imap_folder(mail, candidates)
         if not selected:
             _LOGGER.warning("imap_detail_folder_not_found email=%s folder=%s", email_addr, folder)
-            return None
+            return {
+                "success": False,
+                "error": build_error_payload(
+                    "IMAP_FOLDER_NOT_FOUND",
+                    "IMAP 文件夹不存在或无权限访问",
+                    "IMAPFolderError",
+                    400,
+                    {"provider": provider, "folder": folder, "candidates": candidates},
+                ),
+                "error_code": "IMAP_FOLDER_NOT_FOUND",
+            }
 
         uid = message_id.encode("utf-8") if isinstance(message_id, str) else message_id
         status, data = mail.uid("FETCH", uid, "(FLAGS BODY[])")
         if status != "OK" or not data:
-            return None
+            return {
+                "success": False,
+                "error": build_error_payload(
+                    "EMAIL_DETAIL_FETCH_FAILED",
+                    "获取邮件详情失败",
+                    "IMAPFetchError",
+                    502,
+                    f"status={status}",
+                ),
+                "error_code": "EMAIL_DETAIL_FETCH_FAILED",
+            }
 
         raw_email = None
         flags_text = ""
@@ -421,7 +479,17 @@ def get_email_detail_imap_generic(
                 break
 
         if not raw_email:
-            return None
+            return {
+                "success": False,
+                "error": build_error_payload(
+                    "EMAIL_DETAIL_FETCH_FAILED",
+                    "获取邮件详情失败",
+                    "IMAPFetchError",
+                    502,
+                    "raw_email_missing",
+                ),
+                "error_code": "EMAIL_DETAIL_FETCH_FAILED",
+            }
 
         msg = email.message_from_bytes(raw_email)
         body_text, body_html = _extract_text_and_html(msg)
@@ -449,7 +517,6 @@ def get_email_detail_imap_generic(
             "raw_content": raw_content,
         }
 
-        # 兼容现有前端/验证码提取：提供 body/body_type
         if detail["body_html"]:
             detail["body"] = detail["body_html"]
             detail["body_type"] = "html"
@@ -457,12 +524,46 @@ def get_email_detail_imap_generic(
             detail["body"] = detail["body_text"]
             detail["body_type"] = "text"
 
-        return detail
-    except Exception:
-        return None
+        return {"success": True, "email": detail, "method": "IMAP (Generic)"}
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": build_error_payload(
+                "IMAP_CONNECT_FAILED",
+                sanitize_error_details(str(exc)) or "IMAP 连接失败",
+                "IMAPConnectError",
+                502,
+                "",
+            ),
+            "error_code": "IMAP_CONNECT_FAILED",
+        }
     finally:
         if mail:
             try:
                 mail.logout()
             except Exception:
                 pass
+
+
+def get_email_detail_imap_generic(
+    email_addr: str,
+    imap_password: str,
+    imap_host: str,
+    imap_port: int = 993,
+    message_id: str = "",
+    folder: str = "inbox",
+    provider: str = "_default",
+) -> Optional[Dict[str, Any]]:
+    """兼容旧调用：成功返回详情，失败返回 None。"""
+    result = get_email_detail_imap_generic_result(
+        email_addr=email_addr,
+        imap_password=imap_password,
+        imap_host=imap_host,
+        imap_port=imap_port,
+        message_id=message_id,
+        folder=folder,
+        provider=provider,
+    )
+    if result.get("success"):
+        return result.get("email")
+    return None

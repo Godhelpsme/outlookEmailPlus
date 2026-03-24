@@ -56,6 +56,9 @@
                     currentEmails = data.emails;
                     currentMethod = data.method === 'Graph API' ? 'graph' : 'imap';
                     hasMoreEmails = data.has_more;
+                    if (typeof syncAccountSummaryToAccountCache === 'function' && data.account_summary) {
+                        syncAccountSummaryToAccountCache(email, data.account_summary);
+                    }
 
                     // 保存到缓存
                     emailListCache[cacheKey] = {
@@ -80,21 +83,8 @@
                     }
 
                     // 检查是否需要自动开始轮询
-                    if (typeof isPolling !== 'undefined' && !isPolling && typeof startPolling === 'function') {
-                        // 检查设置是否启用了自动轮询（后端返回 boolean，兼容处理）
-                        fetch('/api/settings')
-                            .then(res => res.json())
-                            .then(settingsData => {
-                                if (settingsData.success && settingsData.settings) {
-                                    const enablePolling = settingsData.settings.enable_auto_polling === true || settingsData.settings.enable_auto_polling === 'true';
-                                    console.log('[轮询] 自动轮询设置:', enablePolling, '当前账号:', currentAccount);
-                                    if (enablePolling && currentAccount) {
-                                        console.log('[轮询] 开始自动轮询');
-                                        startPolling();
-                                    }
-                                }
-                            })
-                            .catch(err => console.error('检查轮询设置失败:', err));
+                    if (typeof syncPollingForCurrentAccount === 'function') {
+                        syncPollingForCurrentAccount();
                     }
                 } else {
                     // 显示详细的多方法失败弹框
@@ -194,7 +184,10 @@
             const bar = document.getElementById('emailBatchActionBar');
             if (selectedEmailIds.size > 0) {
                 bar.style.display = 'flex';
-                document.getElementById('emailSelectedCount').textContent = `已选 ${selectedEmailIds.size} 项`;
+                document.getElementById('emailSelectedCount').textContent =
+                    typeof formatSelectedItemsLabel === 'function'
+                        ? formatSelectedItemsLabel(selectedEmailIds.size)
+                        : `已选 ${selectedEmailIds.size} 项`;
             } else {
                 bar.style.display = 'none';
             }
@@ -332,15 +325,67 @@
         }
 
         // 渲染邮件详情
+        function normalizeEmailInlineResourceKey(value) {
+            if (!value) return '';
+            let normalized = String(value).trim();
+            if (!normalized) return '';
+            if (normalized.toLowerCase().startsWith('cid:')) {
+                normalized = normalized.slice(4);
+            }
+            if (normalized.startsWith('<') && normalized.endsWith('>')) {
+                normalized = normalized.slice(1, -1);
+            }
+            return normalized.trim().toLowerCase();
+        }
+
+        function resolveEmailInlineResource(resourceMap, reference) {
+            if (!resourceMap || typeof resourceMap !== 'object') return '';
+            const normalizedKey = normalizeEmailInlineResourceKey(reference);
+            if (!normalizedKey) return '';
+            return resourceMap[normalizedKey] || '';
+        }
+
+        function rewriteEmailInlineImages(html, email) {
+            const sourceHtml = typeof html === 'string' ? html : '';
+            const resourceMap = email && email.inline_resources && typeof email.inline_resources === 'object'
+                ? email.inline_resources
+                : null;
+
+            if (!sourceHtml || !resourceMap || Object.keys(resourceMap).length === 0 || typeof DOMParser === 'undefined') {
+                return sourceHtml;
+            }
+
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(sourceHtml, 'text/html');
+                const images = doc.querySelectorAll('img[src]');
+
+                images.forEach(img => {
+                    const originalSrc = img.getAttribute('src') || '';
+                    if (!/^cid:/i.test(originalSrc)) return;
+                    const resolvedSrc = resolveEmailInlineResource(resourceMap, originalSrc);
+                    if (resolvedSrc) {
+                        img.setAttribute('src', resolvedSrc);
+                    }
+                });
+
+                return doc.body ? doc.body.innerHTML : sourceHtml;
+            } catch (error) {
+                console.warn('重写邮件内联图片失败:', error);
+                return sourceHtml;
+            }
+        }
+
         function renderEmailDetail(email) {
             const container = document.getElementById('emailDetail');
+            const rawBody = typeof email.body === 'string' ? email.body : '';
 
             const isHtml = email.body_type === 'html' ||
-                (email.body && (email.body.includes('<html') || email.body.includes('<div') || email.body.includes('<p>')));
+                (rawBody && (rawBody.includes('<html') || rawBody.includes('<div') || rawBody.includes('<p>')));
 
             const bodyContent = isHtml
                 ? `<iframe id="emailBodyFrame" sandbox="allow-same-origin" onload="adjustIframeHeight(this)"></iframe>`
-                : `<div class="email-body-text">${escapeHtml(email.body)}</div>`;
+                : `<div class="email-body-text">${escapeHtml(rawBody)}</div>`;
 
             container.innerHTML = `
                 <div class="email-detail-header">
@@ -375,22 +420,25 @@
             if (isHtml) {
                 const iframe = document.getElementById('emailBodyFrame');
                 if (iframe) {
+                    const renderableBody = rewriteEmailInlineImages(rawBody, email);
                     let sanitizedBody;
                     if (isTrustedMode) {
-                        sanitizedBody = email.body; // 信任模式：不过滤
+                        sanitizedBody = renderableBody; // 信任模式：不过滤
                     } else if (typeof DOMPurify !== 'undefined') {
                         // 使用 DOMPurify 净化 HTML 内容，防止 XSS 攻击
-                        sanitizedBody = DOMPurify.sanitize(email.body, {
+                        sanitizedBody = DOMPurify.sanitize(renderableBody, {
                             ALLOWED_TAGS: ['a', 'b', 'i', 'u', 'strong', 'em', 'p', 'br', 'div', 'span', 'img', 'table', 'tr', 'td', 'th', 'thead', 'tbody', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'code'],
                             ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'style', 'class', 'width', 'height', 'align', 'border', 'cellpadding', 'cellspacing'],
                             ALLOW_DATA_ATTR: false,
+                            ADD_DATA_URI_TAGS: ['img'],
+                            ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid):|data:image\/(?:png|gif|jpe?g|webp|bmp|x-icon|vnd\.microsoft\.icon|avif);base64,|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
                             FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
                             FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
                         });
                     } else {
                         // DOMPurify 未加载（CDN 不可达），回退为基本过滤
                         console.warn('DOMPurify 未加载，使用基本 HTML 过滤');
-                        sanitizedBody = email.body
+                        sanitizedBody = renderableBody
                             .replace(/<script[\s\S]*?<\/script>/gi, '')
                             .replace(/<style[\s\S]*?<\/style>/gi, '')
                             .replace(/on\w+="[^"]*"/gi, '')

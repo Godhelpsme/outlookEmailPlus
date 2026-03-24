@@ -18,6 +18,7 @@ ERROR_MESSAGE_EN_MAP = {
     "ACCOUNT_NOT_FOUND": "Account not found",
     "ACCOUNT_IMPORT_FAILED": "Account import failed",
     "AUTH_REQUIRED": "Authentication required",
+    "CSRF_TOKEN_INVALID": "Your session security token expired. Refresh the page and try again.",
     "CRONITER_NOT_INSTALLED": "croniter is not installed",
     "CRON_EXPRESSION_INVALID": "Invalid cron expression",
     "CRON_EXPRESSION_REQUIRED": "Cron expression is required",
@@ -61,6 +62,7 @@ STATUS_MESSAGE_EN_MAP = {
 
 ERROR_MESSAGE_MAP = {
     "ACCOUNT_NOT_FOUND": "账号不存在",
+    "CSRF_TOKEN_INVALID": "会话已失效，请刷新页面后重试",
     "EMAIL_NOTIFICATION_RECIPIENT_INVALID": "接收通知邮箱格式无效",
     "EMAIL_NOTIFICATION_RECIPIENT_NOT_CONFIGURED": "请先配置接收通知邮箱",
     "EMAIL_NOTIFICATION_RECIPIENT_REQUIRED": "请填写接收通知邮箱",

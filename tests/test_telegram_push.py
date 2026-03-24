@@ -276,7 +276,9 @@ class TestToggleTelegramPush(unittest.TestCase):
         """T-12b：禁用后重新启用应重置游标到当前时间"""
         with self.app.app_context():
             from outlook_web.db import get_db
+            from outlook_web.repositories import notification_state as notification_state_repo
             from outlook_web.repositories.accounts import toggle_telegram_push
+            from outlook_web.services import notification_dispatch
 
             db = get_db()
             # 先开启
@@ -295,6 +297,20 @@ class TestToggleTelegramPush(unittest.TestCase):
                 "SELECT telegram_last_checked_at FROM accounts WHERE id = ?", (self._account_id,)
             ).fetchone()["telegram_last_checked_at"]
             self.assertGreater(cursor_new, "2020-01-01T00:00:00", "重新启用应重置游标到更新的时间")
+
+            source_key = notification_dispatch.build_source_key(notification_dispatch.SOURCE_ACCOUNT, "tg@tgtest.com")
+            email_cursor = notification_state_repo.get_cursor(
+                notification_dispatch.CHANNEL_EMAIL,
+                notification_dispatch.SOURCE_ACCOUNT,
+                source_key,
+            )
+            telegram_cursor = notification_state_repo.get_cursor(
+                notification_dispatch.CHANNEL_TELEGRAM,
+                notification_dispatch.SOURCE_ACCOUNT,
+                source_key,
+            )
+            self.assertEqual(email_cursor, cursor_new)
+            self.assertEqual(telegram_cursor, cursor_new)
 
 
 # ===========================================================================
@@ -352,10 +368,11 @@ class TestGetTelegramPushAccounts(unittest.TestCase):
             db.commit()
             _insert_test_account(db, "a@tg14test.com", enabled=1, status="active")
             _insert_test_account(db, "b@tg14test.com", enabled=0, status="active")
+            _insert_test_account(db, "i@tg14test.com", enabled=1, status="inactive")
             _insert_test_account(db, "c@tg14test.com", enabled=1, status="disabled")
 
     def test_t14_returns_only_enabled_active_accounts(self):
-        """T-14：只返回 enabled=1 且 status != disabled 的账号"""
+        """T-14：只返回 enabled=1 且 status=active 的账号"""
         with self.app.app_context():
             from outlook_web.repositories.accounts import get_telegram_push_accounts
 
@@ -363,6 +380,7 @@ class TestGetTelegramPushAccounts(unittest.TestCase):
             emails = [a["email"] for a in accounts]
             self.assertIn("a@tg14test.com", emails)
             self.assertNotIn("b@tg14test.com", emails)  # enabled=0
+            self.assertNotIn("i@tg14test.com", emails)  # status=inactive
             self.assertNotIn("c@tg14test.com", emails)  # status=disabled
 
 
@@ -625,6 +643,9 @@ class TestTelegramToggleEndpoint(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["success"])
         self.assertTrue(data["enabled"])
+        self.assertTrue(data["notification_enabled"])
+        self.assertEqual(data["message"], "该邮箱通知参与已开启")
+        self.assertEqual(data["message_en"], "Mailbox notifications enabled")
 
         with self.app.app_context():
             from outlook_web.db import get_db
@@ -647,12 +668,66 @@ class TestTelegramToggleEndpoint(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["success"])
         self.assertFalse(data["enabled"])
+        self.assertFalse(data["notification_enabled"])
+        self.assertEqual(data["message"], "该邮箱通知参与已关闭")
+        self.assertEqual(data["message_en"], "Mailbox notifications disabled")
 
         with self.app.app_context():
             from outlook_web.db import get_db
 
             row = get_db().execute("SELECT telegram_push_enabled FROM accounts WHERE id = ?", (self._account_id,)).fetchone()
             self.assertEqual(row["telegram_push_enabled"], 0)
+
+    def test_t24b_get_accounts_exposes_notification_enabled_alias(self):
+        with self.app.app_context():
+            from outlook_web.db import get_db
+
+            get_db().execute("UPDATE accounts SET telegram_push_enabled=1 WHERE id=?", (self._account_id,))
+            get_db().commit()
+
+        client = self.app.test_client()
+        _login(client)
+        resp = client.get("/api/accounts")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json() or {}
+        self.assertTrue(data.get("success"))
+        account = next(item for item in (data.get("accounts") or []) if item["id"] == self._account_id)
+        self.assertTrue(account["telegram_push_enabled"])
+        self.assertTrue(account["notification_enabled"])
+
+    def test_t24c_get_account_detail_exposes_notification_enabled_alias(self):
+        with self.app.app_context():
+            from outlook_web.db import get_db
+
+            get_db().execute("UPDATE accounts SET telegram_push_enabled=1 WHERE id=?", (self._account_id,))
+            get_db().commit()
+
+        client = self.app.test_client()
+        _login(client)
+        resp = client.get(f"/api/accounts/{self._account_id}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json() or {}
+        self.assertTrue(data.get("success"))
+        account = data.get("account") or {}
+        self.assertTrue(account["telegram_push_enabled"])
+        self.assertTrue(account["notification_enabled"])
+
+    def test_t24d_search_accounts_exposes_notification_enabled_alias(self):
+        with self.app.app_context():
+            from outlook_web.db import get_db
+
+            get_db().execute("UPDATE accounts SET telegram_push_enabled=1 WHERE id=?", (self._account_id,))
+            get_db().commit()
+
+        client = self.app.test_client()
+        _login(client)
+        resp = client.get("/api/accounts/search?q=api@tgapi.com")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json() or {}
+        self.assertTrue(data.get("success"))
+        account = next(item for item in (data.get("accounts") or []) if item["id"] == self._account_id)
+        self.assertTrue(account["telegram_push_enabled"])
+        self.assertTrue(account["notification_enabled"])
 
     def test_t25_nonexistent_account_404(self):
         """T-25：账号不存在 → HTTP 404"""
@@ -717,6 +792,19 @@ class TestTelegramSettingsAPI(unittest.TestCase):
             self.assertTrue(
                 token_val.startswith("****") or "*" in token_val, f"Bot token should be masked, got: {token_val!r}"
             )
+
+    def test_t27b_get_settings_preserves_telegram_poll_interval_without_ui_clamping(self):
+        with self.app.app_context():
+            from outlook_web.repositories.settings import set_setting
+
+            set_setting("telegram_poll_interval", "7200")
+
+        client = self.app.test_client()
+        _login(client)
+        resp = client.get("/api/settings")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data.get("telegram_poll_interval"), 7200)
 
     def test_t28_put_settings_saves_telegram_config(self):
         """T-28：PUT /api/settings 保存 telegram 配置，bot_token 加密存储"""
@@ -971,7 +1059,13 @@ class TestFetchAccountEmails(unittest.TestCase):
         """Outlook 账号使用 Graph API fetch，并覆盖 inbox/junkemail 目录"""
         from outlook_web.services.telegram_push import _fetch_account_emails
 
-        account = {"id": 1, "email": "x@outlook.com", "provider": "outlook", "telegram_last_checked_at": "2026-03-01T00:00:00"}
+        account = {
+            "id": 1,
+            "email": "x@outlook.com",
+            "provider": "outlook",
+            "account_type": "outlook",
+            "telegram_last_checked_at": "2026-03-01T00:00:00",
+        }
 
         with patch("outlook_web.services.telegram_push._fetch_new_emails_graph", return_value=[]) as mock_graph, patch(
             "outlook_web.services.telegram_push._fetch_new_emails_imap"
@@ -1063,6 +1157,64 @@ class TestFetchAccountEmails(unittest.TestCase):
             [call.args[0] for call in conn.select.call_args_list],
             ["Junk", "Junk Email", '"Junk Email"'],
         )
+
+    def test_outlook_provider_with_imap_account_type_uses_imap_fetch(self):
+        """历史坏数据：provider=outlook 但 account_type=imap 时，应走 IMAP fetch。"""
+        from outlook_web.services.telegram_push import _fetch_account_emails
+
+        account = {
+            "id": 1,
+            "email": "legacy@outlook.com",
+            "provider": "outlook",
+            "account_type": "imap",
+            "telegram_last_checked_at": "2026-03-01T00:00:00",
+        }
+
+        with patch("outlook_web.services.telegram_push._fetch_new_emails_imap", return_value=[]) as mock_imap, patch(
+            "outlook_web.services.telegram_push._fetch_new_emails_graph"
+        ) as mock_graph:
+            _fetch_account_emails(account)
+        self.assertEqual(mock_imap.call_count, 2)
+        mock_graph.assert_not_called()
+
+
+class TestImapFolderResolution(unittest.TestCase):
+    def test_resolve_imap_folder_uses_provider_specific_candidates(self):
+        from outlook_web.services.telegram_push import _resolve_imap_folder
+
+        account = {"email": "qq-folder@test.com", "provider": "qq"}
+
+        self.assertEqual(_resolve_imap_folder(account, "junkemail"), ["Junk", "&V4NXPpCuTvY-"])
+
+    def test_resolve_imap_folder_can_infer_provider_from_email(self):
+        from outlook_web.services.telegram_push import _resolve_imap_folder
+
+        account = {"email": "inferred@163.com", "provider": "imap"}
+
+        self.assertEqual(_resolve_imap_folder(account, "junkemail"), ["&V4NXPpCuTvY-"])
+
+    def test_fetch_new_emails_imap_tries_provider_specific_junk_folders(self):
+        from outlook_web.services.telegram_push import _fetch_new_emails_imap
+
+        account = {
+            "email": "folder@qq.com",
+            "provider": "qq",
+            "imap_host": "imap.qq.com",
+            "imap_port": 993,
+            "imap_password": "enc:dummy",
+        }
+        conn = MagicMock()
+        conn.select.side_effect = [("NO", []), ("OK", [])]
+        conn.search.return_value = ("OK", [b""])
+
+        with patch("imaplib.IMAP4_SSL", return_value=conn), patch(
+            "outlook_web.security.crypto.decrypt_data", return_value="plain-password"
+        ):
+            emails = _fetch_new_emails_imap(account, "2026-03-01T00:00:00", folder="junkemail")
+
+        self.assertEqual(emails, [])
+        self.assertEqual([call.args[0] for call in conn.select.call_args_list], ["Junk", "&V4NXPpCuTvY-"])
+        conn.login.assert_called_once_with("folder@qq.com", "plain-password")
 
 
 class TestParallelJobBehavior(unittest.TestCase):

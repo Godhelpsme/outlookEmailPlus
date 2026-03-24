@@ -1,5 +1,6 @@
 // 全局状态
         let csrfToken = null;
+        let csrfTokenRefreshPromise = null;
         let currentAccount = null;
         let currentGroupId = null;
         let currentEmails = [];
@@ -16,6 +17,7 @@
         let hasMoreEmails = true;
         let currentSkip = 0;
         let lastRefreshTime = null;
+        let mailboxViewMode = localStorage.getItem('ol_mailbox_view_mode') || 'standard';
 
         // 缓存与信任模式
         let emailListCache = {};
@@ -29,6 +31,8 @@
         let pollingInterval = 10;
         let isPolling = false;
         let knownEmailIds = new Set();
+        let accountPanelDensityRafId = null;
+        let accountPanelDensityTimerId = null;
 
         // 导航状态
         let currentPage = 'dashboard';
@@ -39,6 +43,42 @@
 
         function translateAppTextLocal(text) {
             return window.translateAppText ? window.translateAppText(text) : text;
+        }
+
+        function formatGroupDisplayName(name) {
+            return translateAppTextLocal(String(name || '').trim());
+        }
+
+        function formatGroupDescription(description, fallback = '未填写说明') {
+            const rawDescription = String(description || '').trim();
+            return translateAppTextLocal(rawDescription || fallback);
+        }
+
+        function isTempMailboxGroup(groupOrName) {
+            const rawName = typeof groupOrName === 'string'
+                ? String(groupOrName || '').trim()
+                : String(groupOrName?.name || '').trim();
+            return rawName === '临时邮箱' || rawName === 'Temp Mailboxes' || rawName === 'Temp Mailbox';
+        }
+
+        function formatAccountStatusLabel(status) {
+            const normalized = String(status || 'active').trim().toLowerCase();
+            if (getUiLanguage() === 'en') {
+                if (normalized === 'active') return 'Active';
+                if (normalized === 'inactive' || normalized === 'disabled') return 'Inactive';
+                return normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` : 'Active';
+            }
+
+            const zhStatusMap = {
+                active: '正常',
+                inactive: '停用',
+                disabled: '停用'
+            };
+            return translateAppTextLocal(zhStatusMap[normalized] || normalized || '正常');
+        }
+
+        function formatSelectedItemsLabel(count) {
+            return getUiLanguage() === 'en' ? `${count} selected` : `已选 ${count} 项`;
         }
 
         const pickApiMessage = (payload, fallbackZh, fallbackEn) => (
@@ -52,6 +92,89 @@
         const formatUiRelativeTime = (dateStr, fallbackZh = '从未刷新', fallbackEn = 'Never refreshed') => (
             window.formatUiRelativeTime ? window.formatUiRelativeTime(dateStr, fallbackZh, fallbackEn) : (dateStr || fallbackZh)
         );
+
+        function isRefreshableOutlookAccount(accountLike) {
+            // account_type 为空时兼容历史 Outlook 数据，仍按可刷新处理。
+            const accountType = String(accountLike?.account_type || '').trim().toLowerCase();
+            return !accountType || accountType === 'outlook';
+        }
+
+        function buildRefreshErrorSuggestions({ accountType = 'outlook', provider = 'outlook', errorMessage = '' } = {}) {
+            const lang = getUiLanguage();
+            const normalizedType = String(accountType || 'outlook').trim().toLowerCase();
+            const normalizedProvider = String(provider || 'outlook').trim().toLowerCase();
+            const normalizedError = String(errorMessage || '').toLowerCase();
+            // provider 非 outlook 或 account_type=imap 时，统一走 IMAP 建议，避免出现误导性的 Token 提示。
+            const isImap = normalizedType === 'imap' || (normalizedProvider && normalizedProvider !== 'outlook');
+
+            if (isImap) {
+                if (normalizedProvider === 'gmail') {
+                    // Gmail 常见问题是应用专用密码和 IMAP 开关；若携带 refresh_token 关键词，通常是旧日志残留。
+                    if (normalizedError.includes('refresh_token') || normalizedError.includes('aadsts900144')) {
+                        return lang === 'en'
+                            ? [
+                                'This looks like an old Outlook token-refresh error. Gmail mail fetching uses IMAP and does not rely on a refresh token.',
+                                'Check whether the Gmail account is using an app password instead of the normal web login password.',
+                                'Confirm IMAP is enabled in Gmail settings and that there are no recent Google security prompts blocking sign-in.',
+                            ]
+                            : [
+                                '这更像是旧的 Outlook Token 刷新失败记录；Gmail 拉取走 IMAP，不依赖 Refresh Token。',
+                                '请确认 Gmail 这里填写的是“应用专用密码”，不是网页登录密码。',
+                                '请确认 Gmail 已开启 IMAP，并检查 Google 安全中心里是否有拦截登录的风险提示。',
+                            ];
+                    }
+                    return lang === 'en'
+                        ? [
+                            'Gmail IMAP usually requires an app password instead of the normal account password.',
+                            'Confirm IMAP is enabled in Gmail settings and that the account has passed any recent Google security verification prompts.',
+                            'If you recently changed the Google password, regenerate the app password and save the account again.',
+                        ]
+                        : [
+                            'Gmail 的 IMAP 通常需要“应用专用密码”，不能直接使用网页登录密码。',
+                            '请确认 Gmail 已开启 IMAP，并完成最近的 Google 安全验证或异常登录确认。',
+                            '如果近期修改过 Google 密码，请重新生成应用专用密码后再保存该账号。',
+                        ];
+                }
+
+                return lang === 'en'
+                    ? [
+                        'This mailbox uses IMAP fetching, so the key checks are the mailbox authorization code/app password and IMAP host configuration.',
+                        'Confirm the saved mailbox credential is still valid and that IMAP service remains enabled on the provider side.',
+                        'If the provider recently rotated the authorization code or password, save the account again and retry.',
+                    ]
+                    : [
+                        '该邮箱走 IMAP 拉取，重点检查授权码/应用密码以及 IMAP 服务器配置是否正确。',
+                        '请确认当前保存的邮箱凭据仍然有效，并且邮箱服务端的 IMAP 功能没有被关闭。',
+                        '如果近期更换过授权码或密码，请重新保存账号后再重试。',
+                    ];
+            }
+
+            if (normalizedError.includes('refresh_token') || normalizedError.includes('aadsts')) {
+                return lang === 'en'
+                    ? [
+                        'Check whether the Client ID and Refresh Token are complete and free of extra spaces.',
+                        'If the current Refresh Token has expired, regenerate it in a controlled environment and update the account manually.',
+                        'Confirm the mailbox still has the required Microsoft authorization and has not been disabled by tenant policy.',
+                    ]
+                    : [
+                        '检查 Client ID 和 Refresh Token 是否完整、正确，并且没有多余空格。',
+                        '如果当前 Refresh Token 已失效，请在受控环境中重新生成后手工更新账号。',
+                        '确认该邮箱仍具备所需的 Microsoft 授权，且没有被租户策略禁用。',
+                    ];
+            }
+
+            return lang === 'en'
+                ? [
+                    'Check whether the mailbox configuration is complete and retry.',
+                    'If credentials or authorization were changed recently, save the account again before testing.',
+                    'If the issue persists, inspect the provider-side login permissions and access status.',
+                ]
+                : [
+                    '检查账号配置是否完整且没有多余空格，然后重试。',
+                    '如近期改过账号凭据或授权信息，请重新保存后再验证。',
+                    '如问题持续存在，请检查邮箱服务端的登录权限或授权状态。',
+                ];
+        }
 
         // ==================== 主题 & 导航 ====================
 
@@ -92,6 +215,10 @@
                 } else if (currentGroupId) {
                     loadAccountsByGroup(currentGroupId);
                 }
+                if (typeof switchMailboxViewMode === 'function') {
+                    switchMailboxViewMode(mailboxViewMode);
+                }
+                scheduleAccountPanelDensitySync();
             }
             if (page === 'temp-emails' && typeof loadTempEmails === 'function') loadTempEmails(true);
             if (page === 'settings') loadSettings();
@@ -103,6 +230,7 @@
             const titleEl = document.getElementById('topbarTitle');
             const subtitleEl = document.getElementById('topbarSubtitle');
             const actionsEl = document.getElementById('topbar-actions');
+            const mailboxViewModeTemplate = document.getElementById('mailboxViewModeSwitcherTemplate');
             const titles = {
                 'dashboard': ['仪表盘', '系统概览'],
                 'mailbox': ['账号管理', '管理邮箱账号与查看邮件'],
@@ -116,12 +244,32 @@
             if (subtitleEl) subtitleEl.textContent = translateAppTextLocal(t[1]);
             // Context actions
             if (actionsEl) {
+                actionsEl.classList.remove('topbar-actions-compact');
                 if (page === 'mailbox') {
-                    actionsEl.innerHTML = `
-                        <button class="btn btn-sm btn-ghost" onclick="showExportModal()">📤 导出</button>
-                        <button class="btn btn-sm btn-success" onclick="showRefreshModal()">🔄 全量刷新 Token</button>
-                        <button class="btn btn-sm btn-primary" onclick="showAddAccountModal()">＋ 添加账号</button>
+                    const switcherHtml = mailboxViewModeTemplate ? mailboxViewModeTemplate.innerHTML.trim() : '';
+                    const isCompactMode = mailboxViewMode === 'compact';
+                    actionsEl.innerHTML = isCompactMode ? `
+                        ${switcherHtml}
+                    ` : `
+                        ${switcherHtml}
+                        <button class="btn-inline primary" onclick="showAddAccountModal()">＋ 添加账号</button>
+                        <button class="btn-inline ghost" onclick="showExportModal()">📤 导出</button>
+                        <button class="btn-inline ghost" onclick="showRefreshModal()">🔄 全量刷新 Token</button>
                     `;
+                    actionsEl.classList.toggle('topbar-actions-compact', isCompactMode);
+                    if (subtitleEl) {
+                        subtitleEl.textContent = translateAppTextLocal(
+                            isCompactMode ? '按分组查看账号摘要与验证码' : '管理邮箱账号与查看邮件'
+                        );
+                    }
+                    const standardBtn = document.getElementById('mailboxStandardModeBtn');
+                    const compactBtn = document.getElementById('mailboxCompactModeBtn');
+                    if (standardBtn) {
+                        standardBtn.classList.toggle('active', mailboxViewMode === 'standard');
+                    }
+                    if (compactBtn) {
+                        compactBtn.classList.toggle('active', mailboxViewMode === 'compact');
+                    }
                 } else if (page === 'temp-emails') {
                     actionsEl.innerHTML = `
                         <button class="btn btn-sm btn-primary" onclick="generateTempEmail()">＋ 创建邮箱</button>
@@ -183,6 +331,9 @@
                         const accounts = accData.success ? (accData.accounts || []) : [];
                         totalAccounts += accounts.length;
                         accounts.forEach(a => {
+                            if (!isRefreshableOutlookAccount(a)) {
+                                return;
+                            }
                             if (a.last_refresh_status === 'failed') expiredTokens++;
                             else validTokens++;
                         });
@@ -268,6 +419,54 @@
             panel.classList.toggle('is-compact', width < 170);
         }
 
+        function cancelScheduledAccountPanelDensitySync() {
+            if (accountPanelDensityRafId !== null && typeof cancelAnimationFrame === 'function') {
+                cancelAnimationFrame(accountPanelDensityRafId);
+            }
+            if (accountPanelDensityTimerId !== null) {
+                clearTimeout(accountPanelDensityTimerId);
+            }
+            accountPanelDensityRafId = null;
+            accountPanelDensityTimerId = null;
+        }
+
+        function syncAccountPanelDensityIfVisible() {
+            const mailboxPage = document.getElementById('page-mailbox');
+            const panel = document.getElementById('accountPanel');
+            if (!mailboxPage || !panel) return false;
+            if (mailboxPage.classList.contains('page-hidden')) return false;
+
+            const width = panel.getBoundingClientRect().width;
+            if (width <= 0) return false;
+
+            updateAccountPanelDensity();
+            return true;
+        }
+
+        function scheduleAccountPanelDensitySync() {
+            cancelScheduledAccountPanelDensitySync();
+            syncAccountPanelDensityIfVisible();
+
+            const runSync = () => {
+                accountPanelDensityRafId = null;
+                syncAccountPanelDensityIfVisible();
+            };
+
+            if (typeof requestAnimationFrame === 'function') {
+                accountPanelDensityRafId = requestAnimationFrame(runSync);
+                accountPanelDensityTimerId = setTimeout(() => {
+                    accountPanelDensityTimerId = null;
+                    syncAccountPanelDensityIfVisible();
+                }, 0);
+                return;
+            }
+
+            accountPanelDensityTimerId = setTimeout(() => {
+                accountPanelDensityTimerId = null;
+                syncAccountPanelDensityIfVisible();
+            }, 0);
+        }
+
         function initResizeHandles() {
             document.querySelectorAll('.resize-handle').forEach(handle => {
                 handle.addEventListener('mousedown', function(e) {
@@ -322,8 +521,8 @@
                 });
             } catch(e) {}
 
-            updateAccountPanelDensity();
-            window.addEventListener('resize', updateAccountPanelDensity, { passive: true });
+            syncAccountPanelDensityIfVisible();
+            window.addEventListener('resize', scheduleAccountPanelDensitySync, { passive: true });
         }
 
         // ==================== 邮件详情显示控制 ====================
@@ -361,19 +560,73 @@
             }
         }
 
+        async function refreshCSRFToken() {
+            if (csrfTokenRefreshPromise) {
+                return csrfTokenRefreshPromise;
+            }
+
+            csrfTokenRefreshPromise = (async () => {
+                const response = await originalFetch('/api/csrf-token');
+                const data = await response.json();
+                csrfToken = data.csrf_token || null;
+                return csrfToken;
+            })();
+
+            try {
+                return await csrfTokenRefreshPromise;
+            } finally {
+                csrfTokenRefreshPromise = null;
+            }
+        }
+
+        async function isCsrfInvalidResponse(response) {
+            if (!response || response.status !== 400) {
+                return false;
+            }
+            try {
+                const payload = await response.clone().json();
+                return payload?.error?.code === 'CSRF_TOKEN_INVALID';
+            } catch (error) {
+                return false;
+            }
+        }
+
         // 包装 fetch 请求，自动添加 CSRF Token
         const originalFetch = window.fetch;
-        window.fetch = function (url, options = {}) {
+        window.fetch = async function (url, options = {}) {
+            const method = (options.method || 'GET').toUpperCase();
+            const isUnsafeMethod = method !== 'GET';
+            const requestOptions = { ...options };
+
             // 只对非 GET 请求添加 CSRF Token
-            if (options.method && options.method.toUpperCase() !== 'GET' && csrfToken) {
-                options.headers = options.headers || {};
-                if (options.headers instanceof Headers) {
-                    options.headers.append('X-CSRFToken', csrfToken);
+            if (isUnsafeMethod && csrfToken) {
+                requestOptions.headers = requestOptions.headers || {};
+                if (requestOptions.headers instanceof Headers) {
+                    requestOptions.headers.set('X-CSRFToken', csrfToken);
                 } else {
-                    options.headers['X-CSRFToken'] = csrfToken;
+                    requestOptions.headers = { ...requestOptions.headers, 'X-CSRFToken': csrfToken };
                 }
             }
-            return originalFetch(url, options);
+
+            let response = await originalFetch(url, requestOptions);
+            if (
+                isUnsafeMethod &&
+                requestOptions._csrfRetried !== true &&
+                await isCsrfInvalidResponse(response)
+            ) {
+                await refreshCSRFToken();
+
+                const retryOptions = { ...options, _csrfRetried: true };
+                retryOptions.headers = retryOptions.headers || {};
+                if (retryOptions.headers instanceof Headers) {
+                    retryOptions.headers.set('X-CSRFToken', csrfToken || '');
+                } else {
+                    retryOptions.headers = { ...retryOptions.headers, 'X-CSRFToken': csrfToken || '' };
+                }
+                response = await originalFetch(url, retryOptions);
+            }
+
+            return response;
         };
 
         // 初始化
@@ -631,10 +884,15 @@
         }
 
         // 显示刷新错误信息
-        function showRefreshError(accountId, errorMessage, accountEmail) {
+        function showRefreshError(accountId, errorMessage, accountEmail, accountType = 'outlook', provider = 'outlook') {
             document.getElementById('refreshErrorModal').classList.add('show');
             document.getElementById('refreshErrorEmail').textContent = translateAppTextLocal(`账号：${accountEmail || '未知'}`);
             document.getElementById('refreshErrorMessage').textContent = translateAppTextLocal(errorMessage);
+            const suggestionsEl = document.getElementById('refreshErrorSuggestions');
+            if (suggestionsEl) {
+                const suggestions = buildRefreshErrorSuggestions({ accountType, provider, errorMessage });
+                suggestionsEl.innerHTML = suggestions.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+            }
             document.getElementById('editAccountFromErrorBtn').onclick = function () {
                 hideRefreshErrorModal();
                 showEditAccountModal(accountId);
@@ -833,114 +1091,6 @@ ${details}
             return formatUiDateTime(dateStr, { fallback: dateStr || '' });
         }
 
-        // ==================== OAuth Refresh Token 相关 ====================
-
-        // 显示获取 Refresh Token 模态框
-        async function showGetRefreshTokenModal() {
-            document.getElementById('getRefreshTokenModal').classList.add('show');
-
-            // 重置表单
-            document.getElementById('redirectUrlInput').value = '';
-            document.getElementById('refreshTokenResult').style.display = 'none';
-            document.getElementById('refreshTokenOutput').value = '';
-
-            // 重置按钮状态
-            const btn = document.getElementById('exchangeTokenBtn');
-            btn.disabled = false;
-            btn.textContent = translateAppTextLocal('换取 Token');
-            btn.style.display = '';
-
-            // 获取授权 URL
-            try {
-                const response = await fetch('/api/oauth/auth-url');
-                const data = await response.json();
-
-                if (data.success) {
-                    document.getElementById('authUrlInput').value = data.auth_url;
-                } else {
-                    showToast(translateAppTextLocal('获取授权链接失败'), 'error');
-                }
-            } catch (error) {
-                showToast(translateAppTextLocal('获取授权链接失败'), 'error');
-            }
-        }
-
-        // 隐藏获取 Refresh Token 模态框
-        function hideGetRefreshTokenModal() {
-            document.getElementById('getRefreshTokenModal').classList.remove('show');
-        }
-
-        // 复制授权 URL
-        function copyAuthUrl() {
-            const input = document.getElementById('authUrlInput');
-            input.select();
-            document.execCommand('copy');
-            showToast(translateAppTextLocal('授权链接已复制到剪贴板'), 'success');
-        }
-
-        // 打开授权 URL
-        function openAuthUrl() {
-            const url = document.getElementById('authUrlInput').value;
-            if (url) {
-                window.open(url, '_blank');
-                showToast(translateAppTextLocal('已在新窗口打开授权页面'), 'info');
-            }
-        }
-
-        // 换取 Token
-        async function exchangeToken() {
-            const redirectUrl = document.getElementById('redirectUrlInput').value.trim();
-
-            if (!redirectUrl) {
-                showToast(translateAppTextLocal('请先粘贴授权后的完整 URL'), 'error');
-                return;
-            }
-
-            const btn = document.getElementById('exchangeTokenBtn');
-            btn.disabled = true;
-            // 运行时按钮态不会经过模板静态翻译，必须显式走 i18n helper。
-            btn.textContent = translateAppTextLocal('⏳ 换取中...');
-
-            try {
-                const response = await fetch('/api/oauth/exchange-token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        redirected_url: redirectUrl
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    btn.disabled = false;
-                    btn.textContent = translateAppTextLocal('换取 Token');
-
-                    // 关闭 Token 弹窗，打开添加账号弹窗并预填充
-                    hideGetRefreshTokenModal();
-                    showAddAccountModal();
-
-                    const inputEl = document.getElementById('accountInput');
-                    if (inputEl) {
-                        inputEl.value = `your@outlook.com----yourpassword----${data.client_id}----${data.refresh_token}`;
-                        inputEl.select();
-                    }
-
-                    showToast(translateAppTextLocal('✅ Token 获取成功！请将邮箱和密码替换后点导入'), 'success');
-                } else {
-                    handleApiError(data, '换取 Token 失败');
-                    btn.disabled = false;
-                    btn.textContent = translateAppTextLocal('换取 Token');
-                }
-            } catch (error) {
-                showToast(`${translateAppTextLocal('换取 Token 失败')}: ${error.message}`, 'error');
-                btn.disabled = false;
-                btn.textContent = translateAppTextLocal('换取 Token');
-            }
-        }
-
         // ==================== 设置相关 ====================
 
         // 显示设置模态框
@@ -968,6 +1118,7 @@ ${details}
                     name: item.name || '',
                     api_key: item.api_key || item.api_key_masked || '',
                     enabled: !(item.enabled === false || item.enabled === 'false' || item.enabled === 0 || item.enabled === '0'),
+                    pool_access: item.pool_access === true || item.pool_access === 'true' || item.pool_access === 1 || item.pool_access === '1',
                     allowed_emails: Array.isArray(item.allowed_emails) ? item.allowed_emails : []
                 };
 
@@ -991,33 +1142,10 @@ ${details}
             const hintEl = document.getElementById('externalApiKeysJsonHint');
             if (!hintEl) return;
 
-            // 多 Key 编辑器依赖“脱敏值仅表示保持原值”的前后端约定，
-            // 这里的提示文案不是普通 copy，而是在解释保存语义。
             if (normalized.length > 0) {
-                hintEl.textContent = translateAppTextLocal(`当前已配置 ${normalized.length} 个多 Key。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。`);
+                hintEl.textContent = `当前已配置 ${normalized.length} 个多 Key。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。`;
             } else {
-                hintEl.textContent = translateAppTextLocal('用于按调用方维护多个 Key、邮箱范围授权和启停状态。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。');
-            }
-        }
-
-        function setSettingsPasswordChangeEnabled(enabled) {
-            const passwordEl = document.getElementById('settingsPassword');
-            const hintEl = document.getElementById('settingsPasswordHint');
-            const groupEl = document.getElementById('settingsPasswordGroup');
-            if (!passwordEl || !hintEl) return;
-
-            passwordEl.value = '';
-            passwordEl.disabled = !enabled;
-            passwordEl.dataset.allowChange = enabled ? 'true' : 'false';
-            passwordEl.placeholder = translateAppTextLocal(
-                enabled ? '输入新密码（留空则不修改）' : '当前站点已禁用修改登录密码'
-            );
-            hintEl.textContent = translateAppTextLocal(
-                enabled ? '用于登录系统的密码' : '演示站点可通过环境变量禁止在设置页修改登录密码'
-            );
-
-            if (groupEl) {
-                groupEl.style.opacity = enabled ? '1' : '0.7';
+                hintEl.textContent = '用于按调用方维护多个 Key、邮箱范围授权和启停状态。保留已有脱敏 api_key 表示不修改该 Key；清空后保存表示清空全部多 Key。';
             }
         }
 
@@ -1028,7 +1156,8 @@ ${details}
                 const data = await response.json();
 
                 if (data.success) {
-                    setSettingsPasswordChangeEnabled(data.settings.allow_login_password_change !== false);
+                    // 密码不回显
+                    document.getElementById('settingsPassword').value = '';
 
                     // GPTMail API Key（仅脱敏展示，避免回填明文）
                     const gptmailApiKeyEl = document.getElementById('settingsApiKey');
@@ -1053,7 +1182,7 @@ ${details}
                         if (data.settings.external_api_key_set) {
                             externalHintEl.textContent = translateAppTextLocal(`已设置：${data.settings.external_api_key_masked || ''}`);
                         } else {
-                            externalHintEl.textContent = translateAppTextLocal('未设置（设置后可通过 /api/external/* 对外开放接口读取邮件与验证码）');
+                            externalHintEl.textContent = '未设置（设置后可通过 /api/external/* 对外开放接口读取邮件与验证码）';
                         }
                     }
 
@@ -1174,9 +1303,7 @@ ${details}
 
         // 保存设置
         async function saveSettings() {
-            const passwordInputEl = document.getElementById('settingsPassword');
-            const password = passwordInputEl ? passwordInputEl.value : '';
-            const allowPasswordChange = passwordInputEl ? passwordInputEl.dataset.allowChange !== 'false' : true;
+            const password = document.getElementById('settingsPassword').value;
 
             const gptmailApiKeyEl = document.getElementById('settingsApiKey');
             const gptmailApiKey = gptmailApiKeyEl ? gptmailApiKeyEl.value.trim() : '';
@@ -1210,10 +1337,6 @@ ${details}
 
             // 只有输入了密码才更新密码
             if (password) {
-                if (!allowPasswordChange) {
-                    showToast(translateAppTextLocal('当前站点已禁用修改登录密码'), 'error');
-                    return;
-                }
                 settings.login_password = password;
             }
 
@@ -1344,8 +1467,8 @@ ${details}
                 settings.telegram_chat_id = tgChatId;
             }
             if (!isNaN(tgPollInterval)) {
-                if (tgPollInterval < 60 || tgPollInterval > 3600) {
-                    showToast(translateAppTextLocal('Telegram 轮询间隔必须在 60-3600 秒之间'), 'error');
+                if (tgPollInterval < 10 || tgPollInterval > 86400) {
+                    showToast(translateAppTextLocal('Telegram 轮询间隔必须在 10-86400 秒之间'), 'error');
                     return;
                 }
                 settings.telegram_poll_interval = tgPollInterval;
@@ -1730,8 +1853,56 @@ ${details}
 
         // ==================== Token 刷新管理 ====================
 
+        function localizeRefreshModal() {
+            const textMap = {
+                refreshModalTitle: '🔄 令牌刷新管理',
+                refreshStatsTitle: '刷新统计',
+                lastRefreshLabel: '上次全量刷新',
+                totalRefreshLabel: '总邮箱数',
+                successRefreshLabel: '成功邮箱',
+                failedRefreshLabel: '失败邮箱',
+                refreshProgressTitle: '正在刷新...',
+                failedListTitle: '当前失败状态的邮箱',
+                refreshLogsTitle: '全量刷新历史',
+                hideFailedListBtn: '隐藏',
+                hideRefreshLogsBtn: '隐藏',
+                refreshModalCloseBtn: '关闭'
+            };
+
+            Object.entries(textMap).forEach(([id, text]) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = translateAppTextLocal(text);
+            });
+
+            const refreshAllBtn = document.getElementById('refreshAllBtn');
+            if (refreshAllBtn && !refreshAllBtn.disabled) {
+                refreshAllBtn.textContent = translateAppTextLocal('🔄 全量刷新');
+            }
+
+            const retryFailedBtn = document.getElementById('retryFailedBtn');
+            if (retryFailedBtn && !retryFailedBtn.disabled) {
+                retryFailedBtn.textContent = translateAppTextLocal('🔁 重试失败');
+            }
+
+            const loadFailedLogsBtn = document.getElementById('loadFailedLogsBtn');
+            if (loadFailedLogsBtn) {
+                loadFailedLogsBtn.textContent = translateAppTextLocal('❌ 失败邮箱');
+            }
+
+            const loadRefreshLogsBtn = document.getElementById('loadRefreshLogsBtn');
+            if (loadRefreshLogsBtn) {
+                loadRefreshLogsBtn.textContent = translateAppTextLocal('📋 刷新历史');
+            }
+
+            const progressText = document.getElementById('refreshProgressText');
+            if (progressText && progressText.textContent.trim() === '请稍候') {
+                progressText.textContent = translateAppTextLocal('请稍候');
+            }
+        }
+
         // 显示刷新模态框
         async function showRefreshModal() {
+            localizeRefreshModal();
             document.getElementById('refreshModal').classList.add('show');
             // 加载统计数据
             await loadRefreshStats();
@@ -1781,13 +1952,13 @@ ${details}
             const refreshAllBtn = document.getElementById('refreshAllBtn');
             if (refreshAllBtn) {
                 refreshAllBtn.disabled = false;
-                refreshAllBtn.textContent = translateAppTextLocal('🔄 全量刷新');
+                refreshAllBtn.textContent = '🔄 全量刷新';
             }
 
             const retryFailedBtn = document.getElementById('retryFailedBtn');
             if (retryFailedBtn) {
                 retryFailedBtn.disabled = false;
-                retryFailedBtn.textContent = translateAppTextLocal('🔁 重试失败');
+                retryFailedBtn.textContent = '🔁 重试失败';
             }
         }
 
@@ -2284,12 +2455,17 @@ ${details}
             hideAddGroupModal();
             hideAddAccountModal();
             hideEditAccountModal();
+            if (typeof hideAccountRemarkModal === 'function') {
+                hideAccountRemarkModal();
+            }
             hideExportModal();
             hideSettingsModal();
             hideRefreshModal();
             hideRefreshErrorModal();
             hideErrorDetailModal();
-            hideGetRefreshTokenModal();
+            if (typeof hideGetRefreshTokenModal === 'function') {
+                hideGetRefreshTokenModal();
+            }
             closeFullscreenEmail();
         }
 
@@ -2306,12 +2482,17 @@ ${details}
                 hideAddGroupModal();
                 hideAddAccountModal();
                 hideEditAccountModal();
+                if (typeof hideAccountRemarkModal === 'function') {
+                    hideAccountRemarkModal();
+                }
                 hideExportModal();
                 hideSettingsModal();
                 hideRefreshModal();
                 hideRefreshErrorModal();
                 hideErrorDetailModal();
-                hideGetRefreshTokenModal();
+                if (typeof hideGetRefreshTokenModal === 'function') {
+                    hideGetRefreshTokenModal();
+                }
                 closeFullscreenEmail();
             }
         });
@@ -2456,30 +2637,50 @@ ${details}
 
         // 全局选中的账号 ID 集合（跨分组保持）
         let selectedAccountIds = new Set();
+        let batchMoveGroupContext = { scopedAccountIds: null };
+
+        function getActiveAccountCheckboxes() {
+            const selector = mailboxViewMode === 'compact'
+                ? '#compactAccountList .account-select-checkbox'
+                : '#accountList .account-select-checkbox';
+            return Array.from(document.querySelectorAll(selector));
+        }
+
+        function handleAccountSelectionChange(accountId, checked) {
+            if (checked) {
+                selectedAccountIds.add(accountId);
+            } else {
+                selectedAccountIds.delete(accountId);
+            }
+            updateBatchActionBar();
+            updateSelectAllCheckbox();
+        }
 
         // 更新批量操作栏状态
         function updateBatchActionBar() {
-            // 同步 DOM 复选框状态到全局 Set
-            const allCheckboxes = document.querySelectorAll('.account-select-checkbox');
-            allCheckboxes.forEach(cb => {
-                const id = parseInt(cb.value);
-                if (cb.checked) {
-                    selectedAccountIds.add(id);
+            const barConfigs = [
+                { barId: 'batchActionBar', countId: 'selectedCount', active: mailboxViewMode === 'standard' },
+                { barId: 'compactBatchActionBar', countId: 'compactSelectedCount', active: mailboxViewMode === 'compact' }
+            ];
+
+            barConfigs.forEach(config => {
+                const bar = document.getElementById(config.barId);
+                const countSpan = document.getElementById(config.countId);
+                if (!bar || !countSpan) return;
+
+                if (selectedAccountIds.size > 0 && config.active) {
+                    bar.style.display = 'flex';
+                    countSpan.textContent = formatSelectedItemsLabel(selectedAccountIds.size);
                 } else {
-                    selectedAccountIds.delete(id);
+                    bar.style.display = 'none';
                 }
             });
-
-            const bar = document.getElementById('batchActionBar');
-            const countSpan = document.getElementById('selectedCount');
-
-            if (selectedAccountIds.size > 0) {
-                bar.style.display = 'flex';
-                countSpan.textContent = `已选 ${selectedAccountIds.size} 项`;
-            } else {
-                bar.style.display = 'none';
-            }
         }
+
+        window.addEventListener('ui-language-changed', () => {
+            updateTopbar(currentPage);
+            updateBatchActionBar();
+        });
 
         // 显示批量删除确认
         function showBatchDeleteConfirm() {
@@ -2531,10 +2732,16 @@ ${details}
         }
 
         let batchActionType = ''; // 'add' or 'remove'
+        let batchTagContext = { scopedAccountIds: null };
 
         // 显示批量打标模态框
-        async function showBatchTagModal(type) {
+        async function showBatchTagModal(type, options = {}) {
             batchActionType = type;
+            batchTagContext = {
+                scopedAccountIds: Array.isArray(options.scopedAccountIds) && options.scopedAccountIds.length > 0
+                    ? [...options.scopedAccountIds]
+                    : null
+            };
             document.getElementById('batchTagTitle').textContent = translateAppTextLocal(type === 'add' ? '批量添加标签' : '批量移除标签');
             document.getElementById('batchTagModal').classList.add('show');
 
@@ -2544,6 +2751,7 @@ ${details}
 
         function hideBatchTagModal() {
             document.getElementById('batchTagModal').classList.remove('show');
+            batchTagContext = { scopedAccountIds: null };
         }
 
         // 加载标签到下拉框
@@ -2574,11 +2782,12 @@ ${details}
                 return;
             }
 
-            const accountIds = Array.from(selectedAccountIds);
+            const accountIds = batchTagContext.scopedAccountIds ? [...batchTagContext.scopedAccountIds] : Array.from(selectedAccountIds);
 
             if (accountIds.length === 0) return;
 
             try {
+                const hasScopedAccountIds = Boolean(batchTagContext.scopedAccountIds);
                 const response = await fetch('/api/accounts/tags', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2593,8 +2802,9 @@ ${details}
                 if (data.success) {
                     showToast(pickApiMessage(data, data.message, 'Tag update completed'), 'success');
                     hideBatchTagModal();
-                    // 清空选中状态
-                    selectedAccountIds.clear();
+                    if (!hasScopedAccountIds) {
+                        selectedAccountIds.clear();
+                    }
                     // 刷新列表
                     loadGroups();
                     if (currentGroupId) {
@@ -2613,13 +2823,19 @@ ${details}
         // ==================== 批量移动分组 ====================
 
         // 显示批量移动分组模态框
-        async function showBatchMoveGroupModal() {
+        async function showBatchMoveGroupModal(options = {}) {
+            batchMoveGroupContext = {
+                scopedAccountIds: Array.isArray(options.scopedAccountIds) && options.scopedAccountIds.length > 0
+                    ? [...options.scopedAccountIds]
+                    : null
+            };
             document.getElementById('batchMoveGroupModal').classList.add('show');
             await loadGroupsForBatchMove();
         }
 
         function hideBatchMoveGroupModal() {
             document.getElementById('batchMoveGroupModal').classList.remove('show');
+            batchMoveGroupContext = { scopedAccountIds: null };
         }
 
         // 加载分组到下拉框
@@ -2650,11 +2866,14 @@ ${details}
                 return;
             }
 
-            const accountIds = Array.from(selectedAccountIds);
+            const accountIds = batchMoveGroupContext.scopedAccountIds
+                ? [...batchMoveGroupContext.scopedAccountIds]
+                : Array.from(selectedAccountIds);
 
             if (accountIds.length === 0) return;
 
             try {
+                const hasScopedAccountIds = Boolean(batchMoveGroupContext.scopedAccountIds);
                 const response = await fetch('/api/accounts/batch-update-group', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2668,8 +2887,9 @@ ${details}
                 if (data.success) {
                     showToast(pickApiMessage(data, data.message, 'Accounts moved successfully'), 'success');
                     hideBatchMoveGroupModal();
-                    // 清空选中状态
-                    selectedAccountIds.clear();
+                    if (!hasScopedAccountIds) {
+                        selectedAccountIds.clear();
+                    }
                     // 刷新分组列表
                     loadGroups();
                     // 刷新当前分组的邮箱列表

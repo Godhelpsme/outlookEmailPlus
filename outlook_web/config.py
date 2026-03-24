@@ -41,8 +41,9 @@ def get_oauth_client_id() -> str:
     return _getenv("OAUTH_CLIENT_ID", "24d9a0ed-8787-4584-883c-2fd79308940a") or "24d9a0ed-8787-4584-883c-2fd79308940a"
 
 
-def get_oauth_redirect_uri() -> str:
-    return _getenv("OAUTH_REDIRECT_URI", "http://localhost:8080") or "http://localhost:8080"
+def get_oauth_redirect_uri(default: str | None = None) -> str:
+    fallback = default or "http://localhost:8080"
+    return _getenv("OAUTH_REDIRECT_URI", fallback) or fallback
 
 
 def env_true(key: str, default: bool) -> bool:

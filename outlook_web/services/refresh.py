@@ -18,6 +18,27 @@ from outlook_web.security.crypto import decrypt_data, encrypt_data
 REFRESH_LOCK_TTL_SECONDS = 60 * 60 * 2  # 2 小时，避免异常中断导致长时间卡死
 
 
+def build_refreshable_outlook_account_where(column: str = "account_type") -> str:
+    """构造 Outlook-only 刷新规则，兼容历史空 account_type 数据。"""
+    return f"({column} = 'outlook' OR {column} IS NULL)"
+
+
+REFRESHABLE_OUTLOOK_ACCOUNT_WHERE = build_refreshable_outlook_account_where()
+REFRESHABLE_OUTLOOK_ACCOUNT_SELECT = f"""
+    SELECT id, email, client_id, refresh_token, group_id
+    FROM accounts
+    WHERE status = 'active'
+      AND {REFRESHABLE_OUTLOOK_ACCOUNT_WHERE}
+"""
+
+
+def is_refreshable_outlook_account(account_type: Optional[str]) -> bool:
+    """仅 Outlook（以及历史空 account_type）允许进入 OAuth token 刷新链路。"""
+    if account_type is None:
+        return True
+    return isinstance(account_type, str) and account_type.strip().lower() == "outlook"
+
+
 def utcnow() -> datetime:
     """返回 naive UTC 时间（等价于旧的 datetime.utcnow()）"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -64,9 +85,7 @@ def stream_refresh_all_accounts(
         except Exception:
             pass
 
-        accounts = conn.execute(
-            "SELECT id, email, client_id, refresh_token, group_id FROM accounts WHERE status = 'active'"
-        ).fetchall()
+        accounts = conn.execute(REFRESHABLE_OUTLOOK_ACCOUNT_SELECT).fetchall()
         total = len(accounts)
 
         run_id = create_refresh_run(
@@ -301,9 +320,7 @@ def stream_trigger_scheduled_refresh(
         except Exception:
             pass
 
-        accounts = conn.execute(
-            "SELECT id, email, client_id, refresh_token, group_id FROM accounts WHERE status = 'active'"
-        ).fetchall()
+        accounts = conn.execute(REFRESHABLE_OUTLOOK_ACCOUNT_SELECT).fetchall()
 
         total = len(accounts)
         run_id = create_refresh_run(
@@ -562,7 +579,7 @@ def refresh_failed_accounts(
     """重试所有失败的账号（非流式）"""
     lock_owner_id = uuid.uuid4().hex
 
-    cursor = db.execute("""
+    cursor = db.execute(f"""
         SELECT DISTINCT a.id, a.email, a.client_id, a.refresh_token, a.group_id
         FROM accounts a
         INNER JOIN (
@@ -571,7 +588,9 @@ def refresh_failed_accounts(
             GROUP BY account_id
         ) latest ON a.id = latest.account_id
         INNER JOIN account_refresh_logs l ON a.id = l.account_id AND l.created_at = latest.last_refresh
-        WHERE l.status = 'failed' AND a.status = 'active'
+        WHERE l.status = 'failed'
+          AND a.status = 'active'
+          AND {build_refreshable_outlook_account_where('a.account_type')}
     """)
     accounts = cursor.fetchall()
 

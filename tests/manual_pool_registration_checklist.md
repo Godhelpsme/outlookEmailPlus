@@ -2,7 +2,7 @@
 
 ## 目标
 
-验证“通过页面注册 Outlook 账号后，该账号能够进入邮箱池并可被 `/api/pool/*` 或 `/api/external/pool/*` 正常领取”的完整链路。
+验证“通过页面注册 Outlook 账号后，该账号能够进入邮箱池并可被 `/api/external/pool/*` 正常领取”的完整链路。
 
 ## 当前检查结论
 
@@ -102,15 +102,18 @@ WHERE email = '刚注册的邮箱';
 1. 如果勾选“导入后加入邮箱池”，这里应返回 `pool_status = 'available'`。
 2. 如果未勾选，这里应返回 `pool_status = NULL`。
 
-### RTP-005 内部池领取验证
+### RTP-005 对外池领取验证
 
 步骤：
 
-1. 在系统已登录状态下调用：
+1. 在设置中开启 `pool_external_enabled`。
+2. 准备一个具备 `pool_access=true` 的 API Key。
+3. 调用：
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/pool/claim-random ^
+curl -X POST http://127.0.0.1:5000/api/external/pool/claim-random ^
   -H "Content-Type: application/json" ^
+  -H "X-API-Key: <your-key>" ^
   -d "{\"caller_id\":\"manual_test\",\"task_id\":\"rtp005\"}"
 ```
 
@@ -125,33 +128,13 @@ curl -X POST http://127.0.0.1:5000/api/pool/claim-random ^
 1. 勾选加入池时，应能领取到刚注册的账号或至少使池内 `available` 数量增加。
 2. 不勾选时，即使注册成功，也不应被池领取到。
 
-### RTP-006 对外池领取验证
-
-步骤：
-
-1. 在设置中开启 `pool_external_enabled`。
-2. 准备一个具备 `pool_access=true` 的 API Key。
-3. 调用：
-
-```bash
-curl -X POST http://127.0.0.1:5000/api/external/pool/claim-random ^
-  -H "Content-Type: application/json" ^
-  -H "X-API-Key: <your-key>" ^
-  -d "{\"caller_id\":\"manual_test\",\"task_id\":\"rtp006\"}"
-```
-
-预期结果：
-
-1. 如果注册账号已进池，应能正常领取。
-2. 如果注册账号未进池，则依旧可能返回无可用账号。
-
-### RTP-007 领取后状态流转
+### RTP-006 领取后状态流转
 
 步骤：
 
 1. 先确保池内存在一个 `available` 账号。
-2. 调用 `/api/pool/claim-random` 领取。
-3. 调用 `/api/pool/claim-complete`，分别传入：
+2. 调用 `/api/external/pool/claim-random` 领取。
+3. 调用 `/api/external/pool/claim-complete`，分别传入：
    - `success`
    - `verification_timeout`
    - `provider_blocked`
@@ -172,12 +155,12 @@ curl -X POST http://127.0.0.1:5000/api/external/pool/claim-random ^
 已执行：
 
 ```bash
-python -m unittest tests.test_pool -v
+python -m unittest tests.test_external_pool tests.test_external_pool_e2e tests.test_pool tests.test_pool_flow_suite -v
 ```
 
 结果：
 
-1. `39` 个池相关用例全部通过。
+1. 池相关服务层、external pool HTTP 用例与 flow suite 用例全部通过。
 2. 说明“池本身的 claim/release/complete/stats 逻辑”当前没有明显回归。
 3. 但这些测试主要覆盖“已有池内账号”的流转，不覆盖“注册后进入池”。
 

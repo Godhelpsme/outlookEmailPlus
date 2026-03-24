@@ -32,6 +32,11 @@ def create_blueprint() -> Blueprint:
         methods=["DELETE"],
     )
     bp.add_url_rule(
+        "/api/accounts/<int:account_id>/remark",
+        view_func=accounts_controller.api_update_account_remark,
+        methods=["PATCH"],
+    )
+    bp.add_url_rule(
         "/api/accounts/email/<email_addr>",
         view_func=accounts_controller.api_delete_account_by_email,
         methods=["DELETE"],

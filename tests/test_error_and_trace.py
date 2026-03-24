@@ -1,4 +1,5 @@
 import json
+import time
 import unittest
 import uuid
 from unittest.mock import patch
@@ -53,6 +54,7 @@ class ErrorAndTraceTests(unittest.TestCase):
         self.assertEqual(data["error"].get("status"), 404)
         self.assertTrue(data["error"].get("trace_id"))
         self.assertEqual(resp.headers.get("X-Trace-Id"), data["error"].get("trace_id"))
+        self.assertEqual(data["error"].get("details"), "")
 
     def test_trace_id_can_be_propagated_from_request(self):
         client = self.app.test_client()
@@ -250,6 +252,46 @@ class ErrorAndTraceTests(unittest.TestCase):
         self.assertEqual(data.get("success"), True)
         self.assertIn("scheduler", data)
         self.assertIn("refresh", data)
+
+    def test_system_health_and_scheduler_status_use_real_refresh_lock_name(self):
+        client = self.app.test_client()
+        login = client.post("/login", json={"password": "testpass123"})
+        self.assertEqual(login.status_code, 200)
+
+        with self.app.app_context():
+            from outlook_web.db import get_db
+            from outlook_web.services.scheduler import REFRESH_LOCK_NAME
+
+            db = get_db()
+            db.execute("DELETE FROM distributed_locks WHERE name = ?", (REFRESH_LOCK_NAME,))
+            db.execute(
+                """
+                INSERT INTO distributed_locks (name, owner_id, acquired_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (REFRESH_LOCK_NAME, "test-owner", time.time(), time.time() + 120),
+            )
+            db.commit()
+
+        health_resp = client.get("/api/system/health")
+        self.assertEqual(health_resp.status_code, 200)
+        self.assertTrue(health_resp.get_json()["health"]["refresh"]["locked"])
+
+        scheduler_resp = client.get("/api/scheduler/status")
+        self.assertEqual(scheduler_resp.status_code, 200)
+        self.assertTrue(scheduler_resp.get_json()["refresh"]["lock"]["locked"])
+
+    def test_api_500_does_not_leak_exception_details(self):
+        client = self.app.test_client()
+
+        with self.app.test_request_context("/api/test"):
+            from outlook_web.middleware.error_handler import handle_exception
+
+            response, status_code = handle_exception(RuntimeError("database path C:/secret.db exploded"))
+
+        self.assertEqual(status_code, 500)
+        data = response.get_json()
+        self.assertEqual(data["error"].get("details"), "")
 
     def test_validate_cron_endpoint(self):
         client = self.app.test_client()
